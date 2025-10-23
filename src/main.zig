@@ -11,12 +11,15 @@ const h = @import("parse_headers.zig");
 
 const Key = struct { saddr: u32, daddr: u32 };
 
-const Val = struct { time: f64, sport: u16, dport: u16, proto: u8 };
+const Val = struct { sport: u16, dport: u16, proto: u8, len: u16, tcpflags: u8 };
 
-const State = std.AutoHashMap(Key, std.ArrayList(Val));
+const Burst = struct { first: f64, last: f64, counts: std.AutoHashMap(Val, u32) };
+
+const State = std.AutoHashMap(Key, std.ArrayList(Burst));
+
+const burst_timeout_sec = 0.01;
 
 fn onePacket(dlt: i32, pcap_hdr: pcap.pcap_pkthdr, pkt: [*c]const u8, state: *State, allocator: std.mem.Allocator) error{OutOfMemory}!void {
-    // because this can error out, we have to specify so in the return type!!!
     const t: f64 =
         @as(f64, @floatFromInt(pcap_hdr.ts.tv_sec)) +
         @as(f64, @floatFromInt(pcap_hdr.ts.tv_usec)) / 1000000.0;
@@ -27,18 +30,42 @@ fn onePacket(dlt: i32, pcap_hdr: pcap.pcap_pkthdr, pkt: [*c]const u8, state: *St
 
     // Only look at ipv4 packets (for now)
     if (p.ipv4) |ipv4| {
+
+        // Project the fields we need
+        const key: Key = .{ .saddr = ipv4.saddr, .daddr = ipv4.daddr };
+
         const sport = if (p.tcp) |tcp| tcp.source else if (p.udp) |udp| udp.source else 0;
         const dport = if (p.tcp) |tcp| tcp.dest else if (p.udp) |udp| udp.dest else 0;
+        const tcpflags = if (p.tcp) |tcp| tcp.flags else 0;
+        const val: Val = .{ .sport = @byteSwap(sport), .dport = @byteSwap(dport), .proto = ipv4.protocol, .len = @byteSwap(ipv4.tot_len), .tcpflags = tcpflags };
 
-        const key: Key = .{ .saddr = ipv4.saddr, .daddr = ipv4.daddr };
-        const val: Val = .{ .time = t, .sport = sport, .dport = dport, .proto = ipv4.protocol };
-
-        if (state.getPtr(key)) |*vals| {
-            try vals.*.append(val);
+        if (state.getPtr(key)) |*bursts| {
+            // Previously-observed key
+            var burst: *Burst = &bursts.*.items[bursts.*.items.len - 1];
+            if (t - burst.last >= burst_timeout_sec) {
+                // Handle burst timeout
+                var counts = std.AutoHashMap(Val, u32).init(allocator);
+                try counts.put(val, 1);
+                const new_burst: Burst = .{ .first = t, .last = t, .counts = counts };
+                try bursts.*.append(new_burst);
+            } else {
+                // Add packet to burst
+                if (burst.counts.getPtr(val)) |count| {
+                    count.* += 1;
+                } else {
+                    try burst.counts.put(val, 1);
+                }
+                burst.last = t;
+            }
         } else {
-            var vals = std.ArrayList(Val).init(allocator);
-            try vals.append(val);
-            try state.put(key, vals);
+            // First-time observing this key
+            var counts = std.AutoHashMap(Val, u32).init(allocator);
+            try counts.put(val, 1);
+            const new_burst: Burst = .{ .first = t, .last = t, .counts = counts };
+
+            var bursts = std.ArrayList(Burst).init(allocator);
+            try bursts.append(new_burst);
+            try state.put(key, bursts);
         }
     }
 }
@@ -46,11 +73,18 @@ fn onePacket(dlt: i32, pcap_hdr: pcap.pcap_pkthdr, pkt: [*c]const u8, state: *St
 fn printState(state: *State) void {
     var it = state.iterator();
     while (it.next()) |elem| {
-        const src = std.net.Ip4Address.init(@bitCast(elem.key_ptr.saddr), 0);
-        const dst = std.net.Ip4Address.init(@bitCast(elem.key_ptr.daddr), 0);
+        const key = elem.key_ptr;
+        const bursts = elem.value_ptr;
+
+        const src = std.net.Ip4Address.init(@bitCast(key.saddr), 0);
+        const dst = std.net.Ip4Address.init(@bitCast(key.daddr), 0);
         std.debug.print("{} -> {}\n", .{ src, dst });
-        for (elem.value_ptr.items) |val| {
-            std.debug.print("  {d:.6}\n", .{val.time});
+        for (bursts.items) |burst| {
+            std.debug.print("  {d:.6} {d:.6}\n", .{ burst.first, burst.last - burst.first });
+            var it2 = burst.counts.iterator();
+            while (it2.next()) |elem2| {
+                std.debug.print("    {}: {}\n", .{ elem2.key_ptr, elem2.value_ptr.* });
+            }
         }
     }
 }
@@ -91,8 +125,11 @@ pub fn main() !void {
     var state = State.init(allocator);
     defer {
         var it = state.valueIterator();
-        while (it.next()) |vals| {
-            vals.deinit();
+        while (it.next()) |bursts| {
+            for (bursts.items) |*burst| {
+                burst.*.counts.deinit();
+            }
+            bursts.deinit();
         }
         state.deinit();
     }
@@ -107,6 +144,4 @@ pub fn main() !void {
     }
 
     printState(&state);
-
-    std.debug.print("Read {} packets\n", .{i});
 }
