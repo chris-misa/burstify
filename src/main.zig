@@ -89,6 +89,38 @@ fn printState(state: *State) void {
     }
 }
 
+fn printPktsPerFlow(state: *State) void {
+    var it = state.iterator();
+    while (it.next()) |elem| {
+        const key = elem.key_ptr;
+        const bursts = elem.value_ptr;
+
+        const src = std.net.Ip4Address.init(@bitCast(key.saddr), 0);
+        const dst = std.net.Ip4Address.init(@bitCast(key.daddr), 0);
+
+        var pkts: u64 = 0;
+        for (bursts.items) |burst| {
+            var it2 = burst.counts.iterator();
+            while (it2.next()) |elem2| {
+                pkts += elem2.value_ptr.*;
+            }
+        }
+        std.debug.print("{} -> {}: {d}\n", .{ src, dst, pkts });
+    }
+    
+}
+
+fn deinitState(state: *State) void  {
+    var it = state.valueIterator();
+    while (it.next()) |bursts| {
+        for (bursts.items) |*burst| {
+            burst.*.counts.deinit();
+        }
+        bursts.deinit();
+    }
+    state.deinit();
+}
+
 pub fn main() !void {
     if (std.os.argv.len != 2) {
         std.debug.print("Usage: {s} <filename>\n", .{std.os.argv[0]});
@@ -123,16 +155,7 @@ pub fn main() !void {
     var pcap_hdr: pcap.pcap_pkthdr = undefined;
 
     var state = State.init(allocator);
-    defer {
-        var it = state.valueIterator();
-        while (it.next()) |bursts| {
-            for (bursts.items) |*burst| {
-                burst.*.counts.deinit();
-            }
-            bursts.deinit();
-        }
-        state.deinit();
-    }
+    defer deinitState(&state);
 
     while (true) {
         pkt = pcap.pcap_next(hdl, &pcap_hdr);
@@ -143,5 +166,6 @@ pub fn main() !void {
         // TODO: if we actually run out of memory, we should break the loop and exit...
     }
 
-    printState(&state);
+    // printState(&state);
+    printPktsPerFlow(&state);
 }
