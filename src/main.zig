@@ -89,14 +89,17 @@ fn printState(state: *State) void {
     }
 }
 
-fn printPktsPerFlow(state: *State) void {
+fn printPktsPerFlow(state: *State) !void {
+    const stdout = std.io.getStdOut().writer();
+    try stdout.print("src,dst,pkts\n", .{});
+
     var it = state.iterator();
     while (it.next()) |elem| {
         const key = elem.key_ptr;
         const bursts = elem.value_ptr;
 
-        const src = std.net.Ip4Address.init(@bitCast(key.saddr), 0);
-        const dst = std.net.Ip4Address.init(@bitCast(key.daddr), 0);
+        // const src = std.net.Ip4Address.init(@bitCast(key.saddr), 0);
+        // const dst = std.net.Ip4Address.init(@bitCast(key.daddr), 0);
 
         var pkts: u64 = 0;
         for (bursts.items) |burst| {
@@ -105,12 +108,11 @@ fn printPktsPerFlow(state: *State) void {
                 pkts += elem2.value_ptr.*;
             }
         }
-        std.debug.print("{} -> {}: {d}\n", .{ src, dst, pkts });
+        try stdout.print("{d},{d},{d}\n", .{ key.saddr, key.daddr, pkts });
     }
-    
 }
 
-fn deinitState(state: *State) void  {
+fn deinitState(state: *State) void {
     var it = state.valueIterator();
     while (it.next()) |bursts| {
         for (bursts.items) |*burst| {
@@ -167,5 +169,5 @@ pub fn main() !void {
     }
 
     // printState(&state);
-    printPktsPerFlow(&state);
+    try printPktsPerFlow(&state);
 }
