@@ -19,6 +19,40 @@ const State = std.AutoHashMap(Key, std.ArrayList(Burst));
 
 const burst_timeout_sec = 0.01;
 
+fn printPktsPerFlow(state: *State) !void {
+    const stdout = std.io.getStdOut().writer();
+    try stdout.print("src,dst,pkts\n", .{});
+
+    var it = state.iterator();
+    while (it.next()) |elem| {
+        const key = elem.key_ptr;
+        const bursts = elem.value_ptr;
+
+        // const src = std.net.Ip4Address.init(@bitCast(key.saddr), 0);
+        // const dst = std.net.Ip4Address.init(@bitCast(key.daddr), 0);
+
+        var pkts: u64 = 0;
+        for (bursts.items) |burst| {
+            var it2 = burst.counts.iterator();
+            while (it2.next()) |elem2| {
+                pkts += elem2.value_ptr.*;
+            }
+        }
+        try stdout.print("{d},{d},{d}\n", .{ key.saddr, key.daddr, pkts });
+    }
+}
+
+fn deinitState(state: *State) void {
+    var it = state.valueIterator();
+    while (it.next()) |bursts| {
+        for (bursts.items) |*burst| {
+            burst.*.counts.deinit();
+        }
+        bursts.deinit();
+    }
+    state.deinit();
+}
+
 fn onePacket(dlt: i32, pcap_hdr: pcap.pcap_pkthdr, pkt: [*c]const u8, state: *State, allocator: std.mem.Allocator) error{OutOfMemory}!void {
     const t: f64 =
         @as(f64, @floatFromInt(pcap_hdr.ts.tv_sec)) +
