@@ -6,7 +6,6 @@
 
 const std = @import("std");
 
-
 pub const Prefix = struct { base: u32, len: u32 };
 
 pub const PrefixMap = struct {
@@ -34,8 +33,10 @@ pub const PrefixMap = struct {
     /// (After all addresses are added, prefixify() must be called to actually form the map)
     ///
     pub fn addAddr(self: *PrefixMap, addr: u32) error{OutOfMemory}!void {
-        try self.data[32].put(addr, 1.0);
-        self.*.n += 1;
+        if (!self.data[32].contains(addr)) {
+            try self.data[32].put(addr, 1.0);
+            self.*.n += 1;
+        }
     }
 
     ///
@@ -60,13 +61,13 @@ pub const PrefixMap = struct {
         }
 
         // Normalize
-        const n = @as(f64, @floatFromInt(self.n));
-        for (0..33) |pl| {
-            var it = m[pl].valueIterator();
-            while (it.next()) |v| {
-                v.* /= n;
-            }
-        }
+        // const n = @as(f64, @floatFromInt(self.n));
+        // for (0..33) |pl| {
+        //     var it = m[pl].valueIterator();
+        //     while (it.next()) |v| {
+        //         v.* /= n;
+        //     }
+        // }
     }
 
     ///
@@ -91,26 +92,27 @@ pub const PrefixMap = struct {
     ///
     pub fn logit_normal_fit(self: *PrefixMap) error{OutOfMemory}!f64 {
         const m = self.*.data;
-        const n: f64 = @as(f64, @floatFromInt(self.n));
-        
+
         try self.prefixify();
 
-        var count: u32 = 0;
+        var count: u64 = 0;
         var m1: f64 = 0.0;
         var m2: f64 = 0.0;
-        
-        for (0..32) |pl| {
+
+        for (8..32) |pl| {
             var it = m[pl].iterator();
             while (it.next()) |elem| {
                 // Skip the singletons
-                if (elem.value_ptr.* > 1.0 / n) {
+                // if (elem.value_ptr.* > 1.0 / n) {
+                if (elem.value_ptr.* > 1.0) {
                     var w = self.get_w(.{ .base = elem.key_ptr.*, .len = @intCast(pl) });
                     if (w == 0.0) {
-                        w = 1.0 / (2.0 * n);
+                        w = 1.0 / (2.0 * elem.value_ptr.*);
                     }
                     if (w == 1.0) {
-                        w = 1.0 - (1.0 / (2.0 * n));
+                        w = 1.0 - (1.0 / (2.0 * elem.value_ptr.*));
                     }
+
                     const x = @log(w / (1.0 - w));
 
                     // Welford's algorithm...
@@ -125,4 +127,3 @@ pub const PrefixMap = struct {
         return @sqrt(m2 / @as(f64, @floatFromInt(count - 1)));
     }
 };
-

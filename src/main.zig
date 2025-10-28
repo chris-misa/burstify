@@ -11,7 +11,6 @@ const pcap = @cImport(@cInclude("pcap/pcap.h"));
 const h = @import("parse_headers.zig");
 const addr = @import("addrs.zig");
 
-
 pub fn main() !void {
     if (std.os.argv.len != 2) {
         std.debug.print("Usage: {s} <filename>\n", .{std.os.argv[0]});
@@ -25,7 +24,7 @@ pub fn main() !void {
     const allocator = gpa.allocator();
     defer {
         const deinit_status = gpa.deinit();
-        //fail test; can't try in defer as defer is executed after we return
+        // fail test; can't try in defer as defer is executed after we return
         if (deinit_status == .leak) @panic("TEST FAIL: leaked memory");
     }
 
@@ -71,5 +70,5 @@ fn onePacket(dlt: i32, pcap_hdr: pcap.pcap_pkthdr, pkt: [*c]const u8, pfxs: *add
 
 fn finish(pfxs: *addr.PrefixMap) error{OutOfMemory}!void {
     const sigma = try pfxs.logit_normal_fit();
-    std.debug.print("sigma = {d:.6}\n", .{ sigma });
+    std.debug.print("n = {}, sigma = {d:.6}\n", .{ pfxs.n, sigma });
 }
