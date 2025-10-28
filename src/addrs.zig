@@ -17,7 +17,6 @@ pub const Prefix = struct { base: u32, len: u32 };
 ///
 pub const PrefixMap = struct {
     data: []std.AutoHashMap(u32, f64),
-    n: u32,
     allocator: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator) error{OutOfMemory}!PrefixMap {
@@ -25,7 +24,7 @@ pub const PrefixMap = struct {
         for (data) |*elem| {
             elem.* = std.AutoHashMap(u32, f64).init(allocator);
         }
-        return PrefixMap{ .data = data, .n = 0, .allocator = allocator };
+        return PrefixMap{ .data = data, .allocator = allocator };
     }
 
     pub fn deinit(self: *PrefixMap) void {
@@ -36,13 +35,39 @@ pub const PrefixMap = struct {
     }
 
     ///
-    /// Adds the given address to the prefix map
+    /// Returns the number of addresses stored
+    ///
+    pub fn n(self: *PrefixMap) usize {
+        return self.data[32].count();
+    }
+
+    ///
+    /// Adds the given address to the prefix map with weight 1.
     /// (After all addresses are added, prefixify() must be called to actually form the map)
     ///
     pub fn addAddr(self: *PrefixMap, addr: u32) error{OutOfMemory}!void {
+        try self.addAddrWeight(addr, 1.0);
+    }
+
+    ///
+    /// Adds the given address to the prefix map with arbitrary weight.
+    /// (After all addresses are added, prefixify() must be called to actually form the map)
+    ///
+    pub fn addAddrWeight(self: *PrefixMap, addr: u32, weight: f64) error{OutOfMemory}!void {
         if (!self.data[32].contains(addr)) {
+            try self.data[32].put(addr, weight);
+        }
+    }
+
+    ///
+    /// Increments the given address's weight by one.
+    /// (After all addresses are added, prefixify() must be called to actually form the map)
+    ///
+    pub fn incrAddr(self: *PrefixMap, addr: u32) error{OutOfMemory}!void {
+        if (self.data[32].getPtr(addr)) |v| {
+            v.* += 1.0;
+        } else {
             try self.data[32].put(addr, 1.0);
-            self.*.n += 1;
         }
     }
 
@@ -92,7 +117,7 @@ pub const PrefixMap = struct {
     ///
     fn prefixify(self: *PrefixMap) error{OutOfMemory}!void {
         const m = self.*.data;
-        // Sum children
+        // Sum children, bottom-up
         for (0..32) |i| {
             const pl = 32 - i;
             const mask: u32 = @truncate(@as(u64, 0xFFFFFFFF) << @truncate(i + 1));

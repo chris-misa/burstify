@@ -64,11 +64,11 @@ fn onePacket(dlt: i32, pcap_hdr: pcap.pcap_pkthdr, pkt: [*c]const u8, pfxs: *add
 
     // Only look at ipv4 packets (for now)
     if (p.ipv4) |ipv4| {
-        try pfxs.addAddr(ipv4.saddr);
+        try pfxs.incrAddr(ipv4.saddr);
     }
 }
 
 fn finish(pfxs: *addr.PrefixMap) error{OutOfMemory}!void {
     const sigma = try pfxs.logit_normal_fit();
-    std.debug.print("n = {}, sigma = {d:.6}\n", .{ pfxs.n, sigma });
+    std.debug.print("n = {}, sigma = {d:.6}\n", .{ pfxs.n(), sigma });
 }
