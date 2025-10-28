@@ -8,6 +8,8 @@ const std = @import("std");
 
 pub const Prefix = struct { base: u32, len: u32 };
 
+const PrefixMapError = error{AddingToAlreadyBuiltMap};
+
 ///
 /// PrefixMaps accumulate addresses (using addAddr()), form a conservative cascade,
 /// and fit the distribution of the weights to a symmetric logit-normal distribution (using logit_normal_fit()).
@@ -18,13 +20,14 @@ pub const Prefix = struct { base: u32, len: u32 };
 pub const PrefixMap = struct {
     data: []std.AutoHashMap(u32, f64),
     allocator: std.mem.Allocator,
+    is_prefixified: bool,
 
     pub fn init(allocator: std.mem.Allocator) error{OutOfMemory}!PrefixMap {
         const data = try allocator.alloc(std.AutoHashMap(u32, f64), 33);
         for (data) |*elem| {
             elem.* = std.AutoHashMap(u32, f64).init(allocator);
         }
-        return PrefixMap{ .data = data, .allocator = allocator };
+        return PrefixMap{ .data = data, .allocator = allocator, .is_prefixified = false };
     }
 
     pub fn deinit(self: *PrefixMap) void {
@@ -45,7 +48,7 @@ pub const PrefixMap = struct {
     /// Adds the given address to the prefix map with weight 1.
     /// (After all addresses are added, prefixify() must be called to actually form the map)
     ///
-    pub fn addAddr(self: *PrefixMap, addr: u32) error{OutOfMemory}!void {
+    pub fn addAddr(self: *PrefixMap, addr: u32) (error{OutOfMemory} || PrefixMapError)!void {
         try self.addAddrWeight(addr, 1.0);
     }
 
@@ -53,8 +56,10 @@ pub const PrefixMap = struct {
     /// Adds the given address to the prefix map with arbitrary weight.
     /// (After all addresses are added, prefixify() must be called to actually form the map)
     ///
-    pub fn addAddrWeight(self: *PrefixMap, addr: u32, weight: f64) error{OutOfMemory}!void {
-        if (!self.data[32].contains(addr)) {
+    pub fn addAddrWeight(self: *PrefixMap, addr: u32, weight: f64) (error{OutOfMemory} || PrefixMapError)!void {
+        if (self.is_prefixified) {
+            return error.AddingToAlreadyBuiltMap;
+        } else if (!self.data[32].contains(addr)) {
             try self.data[32].put(addr, weight);
         }
     }
@@ -63,7 +68,10 @@ pub const PrefixMap = struct {
     /// Increments the given address's weight by one.
     /// (After all addresses are added, prefixify() must be called to actually form the map)
     ///
-    pub fn incrAddr(self: *PrefixMap, addr: u32) error{OutOfMemory}!void {
+    pub fn incrAddr(self: *PrefixMap, addr: u32) (error{OutOfMemory} || PrefixMapError)!void {
+        if (self.is_prefixified) {
+            return error.AddingToAlreadyBuiltMap;
+        }
         if (self.data[32].getPtr(addr)) |v| {
             v.* += 1.0;
         } else {
@@ -78,7 +86,9 @@ pub const PrefixMap = struct {
     pub fn logit_normal_fit(self: *PrefixMap) error{OutOfMemory}!f64 {
         const m = self.*.data;
 
-        try self.prefixify();
+        if (!self.is_prefixified) {
+            try self.prefixify();
+        }
 
         var count: u64 = 0;
         var m1: f64 = 0.0;
@@ -131,6 +141,8 @@ pub const PrefixMap = struct {
                 }
             }
         }
+
+        self.*.is_prefixified = true;
     }
 
     ///
@@ -151,7 +163,7 @@ pub const PrefixMap = struct {
 };
 
 ///
-/// generate() constructs a conservative cascade with symmetric logit-norma(sigma) generator
+/// generate() constructs a conservative cascade with symmetric logit-normal(sigma) generator
 /// and samples n addresses.
 ///
 /// The caller is responsible for freeing the returned slice.

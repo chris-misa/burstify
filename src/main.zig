@@ -57,7 +57,7 @@ pub fn main() !void {
     try finish(&pfxs);
 }
 
-fn onePacket(dlt: i32, pcap_hdr: pcap.pcap_pkthdr, pkt: [*c]const u8, pfxs: *addr.PrefixMap) error{OutOfMemory}!void {
+fn onePacket(dlt: i32, pcap_hdr: pcap.pcap_pkthdr, pkt: [*c]const u8, pfxs: *addr.PrefixMap) !void {
     var p: h.struct_headers = .{};
 
     _ = h.parse_headers(dlt == pcap.DLT_EN10MB, pkt, pkt + pcap_hdr.caplen, &p);
