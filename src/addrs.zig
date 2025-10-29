@@ -152,42 +152,24 @@ pub const PrefixMap = struct {
         }
 
         const nf: f64 = @as(f64, @floatFromInt(self.n()));
-        var mus: [33]f64 = .{0} ** 33;
+        var slope: SlopeFitter = .{};
+
+        // Go down prefix tree towards addr and estimate the slope along the way.
         for (0..33) |pl| {
             const mask: u32 = @truncate(@as(u64, 0xFFFFFFFF) << @truncate(32 - pl));
             if (self.data[pl].get(addr & mask)) |count| {
                 if (count > 1.0) {
-                    mus[pl] = -@log2(count / nf);
+                    const x = @as(f64, @floatFromInt(pl));
+                    const y = -@log2(count / nf);
+                    slope.addPoint(x, y);
                 } else {
-                    mus[pl] = -1.0;
+                    break;
                 }
             } else {
-                mus[pl] = -1.0;
-            }
-        }
-
-        // Welford-type algorithm for variance and covariance
-        var mx: f64 = 0.0;
-        var my: f64 = 0.0;
-        var c: f64 = 0.0;
-        var v: f64 = 0.0;
-        var count: f64 = 0.0;
-        for (0..33, mus) |xi, y| {
-            if (y < 0.0) {
                 break;
             }
-            const x = @as(f64, @floatFromInt(xi));
-            count += 1.0;
-            const dx = x - mx;
-            mx += dx / count;
-            my += (y - my) / count;
-            c += dx * (y - my);
-            v += dx * (x - mx);
         }
-        // covariance is c / (count - 1)
-        // variance is v / (count - 1)
-        // ... so the (count - 1) terms cancel out.
-        return c / v;
+        return slope.fit();
     }
 
     ///
@@ -228,6 +210,31 @@ pub const PrefixMap = struct {
         const r: f64 = if (m[pl].get(r_base)) |v| v else 0.0;
 
         return l / (l + r);
+    }
+};
+
+pub const SlopeFitter = struct {
+    mx: f64 = 0.0,
+    my: f64 = 0.0,
+    c: f64 = 0.0,
+    v: f64 = 0.0,
+    count: f64 = 0.0,
+
+    pub fn addPoint(self: *SlopeFitter, x: f64, y: f64) void {
+        // Welford-type algorithm for variance and covariance
+        self.*.count += 1.0;
+        const dx = x - self.*.mx;
+        self.*.mx += dx / self.*.count;
+        self.*.my += (y - self.*.my) / self.*.count;
+        self.*.c += dx * (y - self.*.my);
+        self.*.v += dx * (x - self.*.mx);
+    }
+
+    pub fn fit(self: SlopeFitter) f64 {
+        // covariance is c / (count - 1)
+        // variance is v / (count - 1)
+        // ... so the (count - 1) terms cancel out.
+        return self.c / self.v;
     }
 };
 
