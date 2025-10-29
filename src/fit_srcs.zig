@@ -37,6 +37,22 @@ pub fn main() !void {
     std.debug.print("Read {} lines\n", .{count});
     const sigma = try pfxs.logit_normal_fit();
     std.debug.print("sigma = {d:.6}\n", .{sigma});
+
+    {
+        var it = pfxs.data[32].keyIterator();
+        var alphas: []f64 = try allocator.alloc(f64, pfxs.n());
+        defer allocator.free(alphas);
+
+        var i: u32 = 0;
+        while (it.next()) |x| {
+            alphas[i] = try pfxs.getSingularity(x.*);
+            i += 1;
+        }
+        std.mem.sort(f64, alphas, {}, comptime std.sort.asc(f64));
+
+        std.debug.print("min alpha = {d:.6}\n", .{alphas[0]});
+        std.debug.print("max alpha = {d:.6}\n", .{alphas[pfxs.n() - 1]});
+    }
 }
 
 fn string_to_ipv4(str: []const u8) !u32 {

@@ -122,6 +122,53 @@ pub const PrefixMap = struct {
     }
 
     ///
+    /// Returns the singular scaling estimate (alpha(x)) at the given /32 address w.r.t. this prefix map.
+    ///
+    pub fn getSingularity(self: *PrefixMap, addr: u32) error{OutOfMemory}!f64 {
+        if (!self.is_prefixified) {
+            try self.prefixify();
+        }
+
+        const nf: f64 = @as(f64, @floatFromInt(self.n()));
+        var mus: [33]f64 = .{0} ** 33;
+        for (0..33) |pl| {
+            const mask: u32 = @truncate(@as(u64, 0xFFFFFFFF) << @truncate(32 - pl));
+            if (self.data[pl].get(addr & mask)) |count| {
+                if (count > 1.0) {
+                    mus[pl] = -@log2(count / nf);
+                } else {
+                    mus[pl] = -1.0;
+                }
+            } else {
+                mus[pl] = -1.0;
+            }
+        }
+
+        // Welford-type algorithm for variance and covariance
+        var mx: f64 = 0.0;
+        var my: f64 = 0.0;
+        var c: f64 = 0.0;
+        var v: f64 = 0.0;
+        var count: f64 = 0.0;
+        for (0..33, mus) |xi, y| {
+            if (y < 0.0) {
+                break;
+            }
+            const x = @as(f64, @floatFromInt(xi));
+            count += 1.0;
+            const dx = x - mx;
+            mx += dx / count;
+            my += (y - my) / count;
+            c += dx * (y - my);
+            v += dx * (x - mx);
+        }
+        // covariance is c / (count - 1)
+        // variance is v / (count - 1)
+        // ... so the (count - 1) terms cancel out.
+        return c / v;
+    }
+
+    ///
     /// Form the prefix map for the addresses already added.
     /// Returns the total number of addresses.
     ///
