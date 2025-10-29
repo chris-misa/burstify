@@ -40,18 +40,27 @@ pub fn main() !void {
 
     {
         var it = pfxs.data[32].keyIterator();
-        var alphas: []f64 = try allocator.alloc(f64, pfxs.n());
+        var alphas: []struct {u32, f64} = try allocator.alloc(struct {u32, f64}, pfxs.n());
         defer allocator.free(alphas);
 
         var i: u32 = 0;
         while (it.next()) |x| {
-            alphas[i] = try pfxs.getSingularity(x.*);
+            const alpha = try pfxs.getSingularity(x.*);
+            alphas[i] = .{ x.*, alpha };
             i += 1;
         }
-        std.mem.sort(f64, alphas, {}, comptime std.sort.asc(f64));
+        // std.mem.sort(f64, alphas, {}, comptime std.sort.asc(f64));
+        const comp = struct {
+            fn lt(_: void, l: struct {u32, f64}, r: struct {u32, f64}) bool {
+                return l.@"1" < r.@"1";
+            }
+        }.lt;
+        std.mem.sort(struct {u32, f64}, alphas, {}, comp);
 
-        std.debug.print("min alpha = {d:.6}\n", .{alphas[0]});
-        std.debug.print("max alpha = {d:.6}\n", .{alphas[pfxs.n() - 1]});
+        const mn = alphas[0];
+        const mx = alphas[pfxs.n() - 1];
+        std.debug.print("min alpha = {} for {s}\n", .{mn.@"1", addr.Prefix{.base = mn.@"0", .len = 32}});
+        std.debug.print("max alpha = {} for {s}\n", .{mx.@"1", addr.Prefix{.base = mx.@"0", .len = 32}});
     }
 }
 

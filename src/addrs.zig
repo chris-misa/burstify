@@ -6,16 +6,38 @@
 
 const std = @import("std");
 
-pub const Prefix = struct { base: u32, len: u32 };
+pub const Prefix = struct {
+    base: u32,
+    len: u32,
+
+    pub fn format(
+        self: Prefix,
+        comptime fmt: []const u8,
+        options: std.fmt.FormatOptions,
+        writer: anytype
+    ) !void {
+        _ = fmt;
+        _ = options;
+        try writer.print("{d}.{d}.{d}.{d}/{d}", .{
+            (self.base >> 24) & 0xFF,
+            (self.base >> 16) & 0xFF,
+            (self.base >> 8) & 0xFF,
+            self.base & 0xFF,
+            self.len
+        });
+    }
+};
 
 const PrefixMapError = error{AddingToAlreadyBuiltMap};
 
 ///
-/// PrefixMaps accumulate addresses (using addAddr()), form a conservative cascade,
-/// and fit the distribution of the weights to a symmetric logit-normal distribution (using logit_normal_fit()).
+/// PrefixMap accumulates addresses (using PrefixMap.addAddr()) then forms the prefix tree of cascade structure.
 ///
-/// Might eventually add more of the multifractal analysis implementation here, but this is all that's required
-/// for now.
+/// Once this structure is formed, several analysis can be performed.
+/// * PrefixMap.logit_normal_fit() fits the distribution of the weights to a symmetric logit-normal distribution returning the fit parameter sigma.
+/// * PrefixMap.getSingularity(addr) estimates the singular scaling exponent at addr.
+///
+/// Note that the analysis functions automatically form the prefix tree (by calling PrefixMap.prefixify()) so you can't add more addresses after calling them.
 ///
 pub const PrefixMap = struct {
     data: []std.AutoHashMap(u32, f64),
