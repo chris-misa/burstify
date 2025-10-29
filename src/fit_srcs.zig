@@ -22,7 +22,7 @@ pub fn main() !void {
     var buffer: [1024]u8 = undefined;
     var count: u32 = 0;
 
-    var pfxs = try addr.PrefixMap.init(allocator);
+    var pfxs = try addr.AddrAnalyzer.init(allocator);
     defer pfxs.deinit();
 
     while (true) {

@@ -28,31 +28,31 @@ pub const Prefix = struct {
     }
 };
 
-const PrefixMapError = error{AddingToAlreadyBuiltMap};
+const AddrAnalyzerError = error{AddingToAlreadyBuiltMap};
 
 ///
-/// PrefixMap accumulates addresses (using PrefixMap.addAddr()) then forms the prefix tree of cascade structure.
+/// AddrAnalyzer accumulates addresses (using AddrAnalyzer.addAddr()) then forms the prefix tree of cascade structure.
 ///
 /// Once this structure is formed, several analysis can be performed.
-/// * PrefixMap.logit_normal_fit() fits the distribution of the weights to a symmetric logit-normal distribution returning the fit parameter sigma.
-/// * PrefixMap.getSingularity(addr) estimates the singular scaling exponent at addr.
+/// * AddrAnalyzer.logit_normal_fit() fits the distribution of the weights to a symmetric logit-normal distribution returning the fit parameter sigma.
+/// * AddrAnalyzer.getSingularity(addr) estimates the singular scaling exponent at addr.
 ///
-/// Note that the analysis functions automatically form the prefix tree (by calling PrefixMap.prefixify()) so you can't add more addresses after calling them.
+/// Note that the analysis functions automatically form the prefix tree (by calling AddrAnalyzer.prefixify()) so you can't add more addresses after calling them.
 ///
-pub const PrefixMap = struct {
+pub const AddrAnalyzer = struct {
     data: []std.AutoHashMap(u32, f64),
     allocator: std.mem.Allocator,
     is_prefixified: bool,
 
-    pub fn init(allocator: std.mem.Allocator) error{OutOfMemory}!PrefixMap {
+    pub fn init(allocator: std.mem.Allocator) error{OutOfMemory}!AddrAnalyzer {
         const data = try allocator.alloc(std.AutoHashMap(u32, f64), 33);
         for (data) |*elem| {
             elem.* = std.AutoHashMap(u32, f64).init(allocator);
         }
-        return PrefixMap{ .data = data, .allocator = allocator, .is_prefixified = false };
+        return AddrAnalyzer{ .data = data, .allocator = allocator, .is_prefixified = false };
     }
 
-    pub fn deinit(self: *PrefixMap) void {
+    pub fn deinit(self: *AddrAnalyzer) void {
         for (self.data) |*elem| {
             elem.deinit();
         }
@@ -62,7 +62,7 @@ pub const PrefixMap = struct {
     ///
     /// Returns the number of addresses stored
     ///
-    pub fn n(self: *PrefixMap) usize {
+    pub fn n(self: *AddrAnalyzer) usize {
         return self.data[32].count();
     }
 
@@ -70,7 +70,7 @@ pub const PrefixMap = struct {
     /// Adds the given address to the prefix map with weight 1.
     /// (After all addresses are added, prefixify() must be called to actually form the map)
     ///
-    pub fn addAddr(self: *PrefixMap, addr: u32) (error{OutOfMemory} || PrefixMapError)!void {
+    pub fn addAddr(self: *AddrAnalyzer, addr: u32) (error{OutOfMemory} || AddrAnalyzerError)!void {
         try self.addAddrWeight(addr, 1.0);
     }
 
@@ -78,7 +78,7 @@ pub const PrefixMap = struct {
     /// Adds the given address to the prefix map with arbitrary weight.
     /// (After all addresses are added, prefixify() must be called to actually form the map)
     ///
-    pub fn addAddrWeight(self: *PrefixMap, addr: u32, weight: f64) (error{OutOfMemory} || PrefixMapError)!void {
+    pub fn addAddrWeight(self: *AddrAnalyzer, addr: u32, weight: f64) (error{OutOfMemory} || AddrAnalyzerError)!void {
         if (self.is_prefixified) {
             return error.AddingToAlreadyBuiltMap;
         } else if (!self.data[32].contains(addr)) {
@@ -90,7 +90,7 @@ pub const PrefixMap = struct {
     /// Increments the given address's weight by one.
     /// (After all addresses are added, prefixify() must be called to actually form the map)
     ///
-    pub fn incrAddr(self: *PrefixMap, addr: u32) (error{OutOfMemory} || PrefixMapError)!void {
+    pub fn incrAddr(self: *AddrAnalyzer, addr: u32) (error{OutOfMemory} || AddrAnalyzerError)!void {
         if (self.is_prefixified) {
             return error.AddingToAlreadyBuiltMap;
         }
@@ -105,7 +105,7 @@ pub const PrefixMap = struct {
     /// Performs a symmetric logit-normal fit of the weights of the given prefix map.
     /// Returns the fit value of sigma.
     ///
-    pub fn logit_normal_fit(self: *PrefixMap) error{OutOfMemory}!f64 {
+    pub fn logit_normal_fit(self: *AddrAnalyzer) error{OutOfMemory}!f64 {
         const m = self.*.data;
 
         if (!self.is_prefixified) {
@@ -146,7 +146,7 @@ pub const PrefixMap = struct {
     ///
     /// Returns the singular scaling estimate (alpha(x)) at the given /32 address w.r.t. this prefix map.
     ///
-    pub fn getSingularity(self: *PrefixMap, addr: u32) error{OutOfMemory}!f64 {
+    pub fn getSingularity(self: *AddrAnalyzer, addr: u32) error{OutOfMemory}!f64 {
         if (!self.is_prefixified) {
             try self.prefixify();
         }
@@ -176,7 +176,7 @@ pub const PrefixMap = struct {
     /// Form the prefix map for the addresses already added.
     /// Returns the total number of addresses.
     ///
-    fn prefixify(self: *PrefixMap) error{OutOfMemory}!void {
+    fn prefixify(self: *AddrAnalyzer) error{OutOfMemory}!void {
         const m = self.*.data;
         // Sum children, bottom-up
         for (0..32) |i| {
@@ -200,7 +200,7 @@ pub const PrefixMap = struct {
     /// Look up the weight (w) of how much mass goes left at the given prefix.
     /// (Note that how much mass goes right is just (1.0 - w).)
     ///
-    fn get_w(self: *PrefixMap, pfx: Prefix) f64 {
+    fn get_w(self: *AddrAnalyzer, pfx: Prefix) f64 {
         const m = self.*.data;
         const pl = pfx.len + 1;
         const l_base: u32 = pfx.base;
@@ -304,6 +304,43 @@ fn balance(left: Prefix, left_count: u32, right: Prefix, right_count: u32) struc
     }
     return .{ left_final, right_final };
 }
+
+///
+/// Maintain a mapping between real-world addresses and generated addresses.
+/// The mapping preserves the alpha-ranking of addresses in each set.
+///
+pub const AddrMap = struct {
+    map: std.AutoHashMap(u32, u32),
+
+    ///
+    /// Constructs an AddrMap from the given lists of (address, alpha(address)) pairs.
+    /// The lists end up sorted.
+    ///
+    pub fn init(allocator: std.mem.Allocator, from: []struct {u32, f64}, to: []struct {u32, f64}) error{OutOfMemory}!AddrMap {
+        var map = std.AutoHashMap(u32, u32).init(allocator);
+        
+        const comp = struct {
+            fn lt(_: void, l: struct {u32, f64}, r: struct {u32, f64}) bool {
+                return l.@"1" < r.@"1";
+            }
+        }.lt;
+        std.mem.sort(struct { u32, f64 }, from, {}, comp);
+        std.mem.sort(struct { u32, f64 }, to, {}, comp);
+
+          for (from, to) |f, t| {
+            map.put(f, t);
+        }
+        return AddrMap{ .map = map };
+    }
+    
+    pub fn deinit(self: *AddrMap) void {
+        self.map.deinit();
+    }
+
+    pub fn get(self: AddrMap, addr: u32) ?u32 {
+        return self.map.get(addr);
+    }
+};
 
 ///
 /// Utility for estimating slopes using ordinary least-squares.
