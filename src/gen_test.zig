@@ -32,6 +32,6 @@ pub fn main() !void {
 
     const stdout = std.io.getStdOut().writer();
     for (res.items) |a| {
-        try stdout.print("{}.{}.{}.{}\n", .{ (a >> 24) & 0xFF, (a >> 16) & 0xFF, (a >> 8) & 0xFF, a & 0xFF });
+        try stdout.print("{s},{}\n", .{ addr.Prefix{.base = a.@"0", .len = 32}, a.@"1" });
     }
 }

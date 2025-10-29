@@ -18,7 +18,7 @@ pub const Prefix = struct {
     ) !void {
         _ = fmt;
         _ = options;
-        try writer.print("{d}.{d}.{d}.{d}/{d}", .{
+        try writer.print("{d}.{d}.{d}.{d},{d}", .{
             (self.base >> 24) & 0xFF,
             (self.base >> 16) & 0xFF,
             (self.base >> 8) & 0xFF,
@@ -213,30 +213,6 @@ pub const PrefixMap = struct {
     }
 };
 
-pub const SlopeFitter = struct {
-    mx: f64 = 0.0,
-    my: f64 = 0.0,
-    c: f64 = 0.0,
-    v: f64 = 0.0,
-    count: f64 = 0.0,
-
-    pub fn addPoint(self: *SlopeFitter, x: f64, y: f64) void {
-        // Welford-type algorithm for variance and covariance
-        self.*.count += 1.0;
-        const dx = x - self.*.mx;
-        self.*.mx += dx / self.*.count;
-        self.*.my += (y - self.*.my) / self.*.count;
-        self.*.c += dx * (y - self.*.my);
-        self.*.v += dx * (x - self.*.mx);
-    }
-
-    pub fn fit(self: SlopeFitter) f64 {
-        // covariance is c / (count - 1)
-        // variance is v / (count - 1)
-        // ... so the (count - 1) terms cancel out.
-        return self.c / self.v;
-    }
-};
 
 ///
 /// generate() constructs a conservative cascade with symmetric logit-normal(sigma) generator
@@ -244,28 +220,51 @@ pub const SlopeFitter = struct {
 ///
 /// The caller is responsible for freeing the returned slice.
 ///
-pub fn generate(sigma: f64, n: u32, rand: std.Random, allocator: std.mem.Allocator) error{OutOfMemory}!std.ArrayList(u32) {
+pub fn generate(
+    sigma: f64,
+    n: u32,
+    rand: std.Random,
+    allocator: std.mem.Allocator
+) error{OutOfMemory}!std.ArrayList(struct {u32, f64}) {
     const root = Prefix{ .base = 0, .len = 0 };
-    var res = try std.ArrayList(u32).initCapacity(allocator, n);
-    try gen_rec(sigma, root, n, rand, &res);
+    var res = try std.ArrayList(struct{u32, f64}).initCapacity(allocator, n);
+    const slope: SlopeFitter = .{};
+    try gen_rec(sigma, n, root, n, rand, &res, slope);
     return res;
 }
 
-fn gen_rec(sigma: f64, pfx: Prefix, n: u32, rand: std.Random, res: *std.ArrayList(u32)) error{OutOfMemory}!void {
+fn gen_rec(
+    sigma: f64,
+    total: u32,
+    pfx: Prefix,
+    n: u32,
+    rand: std.Random,
+    res: *std.ArrayList(struct {u32, f64}),
+    slope: SlopeFitter
+) error{OutOfMemory}!void {
     if (n == 0) {
         return;
     } else if (pfx.len == 32) {
-        try res.append(pfx.base);
+        const alpha = slope.fit();
+        try res.append(.{ pfx.base, alpha });
     } else {
-        const x: f64 = rand.floatNorm(f64) * sigma;
-        const w: f64 = 1.0 / (1 + @exp(-x));
+        const normal: f64 = rand.floatNorm(f64) * sigma;
+        const w: f64 = 1.0 / (1 + @exp(-normal));
         const left_count: u32 = @intFromFloat(@round(@as(f64, @floatFromInt(n)) * w));
         const right_count: u32 = @intFromFloat(@round(@as(f64, @floatFromInt(n)) * (1.0 - w)));
         const left = Prefix{ .base = pfx.base, .len = pfx.len + 1 };
         const right = Prefix{ .base = pfx.base | (@as(u32, 1) << @truncate(32 - (pfx.len + 1))), .len = pfx.len + 1 };
         const left_count2, const right_count2 = balance(left, left_count, right, right_count);
-        try gen_rec(sigma, left, left_count2, rand, res);
-        try gen_rec(sigma, right, right_count2, rand, res);
+
+        var slope2 = slope;
+        if (n > 1) {
+            const x = @as(f64, @floatFromInt(pfx.len));
+            const y = -@log2(@as(f64, @floatFromInt(n)) / @as(f64, @floatFromInt(total)));
+            slope2.addPoint(x, y);
+        }
+        
+        try gen_rec(sigma, total, left, left_count2, rand, res, slope2);
+        try gen_rec(sigma, total, right, right_count2, rand, res, slope2);
     }
 }
 
@@ -305,3 +304,31 @@ fn balance(left: Prefix, left_count: u32, right: Prefix, right_count: u32) struc
     }
     return .{ left_final, right_final };
 }
+
+///
+/// Utility for estimating slopes using ordinary least-squares.
+///
+pub const SlopeFitter = struct {
+    mx: f64 = 0.0,
+    my: f64 = 0.0,
+    c: f64 = 0.0,
+    v: f64 = 0.0,
+    count: f64 = 0.0,
+
+    pub fn addPoint(self: *SlopeFitter, x: f64, y: f64) void {
+        // Welford-type algorithm for variance and covariance
+        self.*.count += 1.0;
+        const dx = x - self.*.mx;
+        self.*.mx += dx / self.*.count;
+        self.*.my += (y - self.*.my) / self.*.count;
+        self.*.c += dx * (y - self.*.my);
+        self.*.v += dx * (x - self.*.mx);
+    }
+
+    pub fn fit(self: SlopeFitter) f64 {
+        // covariance is c / (count - 1)
+        // variance is v / (count - 1)
+        // ... so the (count - 1) terms cancel out.
+        return self.c / self.v;
+    }
+};
