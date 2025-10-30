@@ -10,21 +10,10 @@ pub const Prefix = struct {
     base: u32,
     len: u32,
 
-    pub fn format(
-        self: Prefix,
-        comptime fmt: []const u8,
-        options: std.fmt.FormatOptions,
-        writer: anytype
-    ) !void {
+    pub fn format(self: Prefix, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
         _ = fmt;
         _ = options;
-        try writer.print("{d}.{d}.{d}.{d},{d}", .{
-            (self.base >> 24) & 0xFF,
-            (self.base >> 16) & 0xFF,
-            (self.base >> 8) & 0xFF,
-            self.base & 0xFF,
-            self.len
-        });
+        try writer.print("{d}.{d}.{d}.{d},{d}", .{ (self.base >> 24) & 0xFF, (self.base >> 16) & 0xFF, (self.base >> 8) & 0xFF, self.base & 0xFF, self.len });
     }
 };
 
@@ -213,35 +202,21 @@ pub const AddrAnalyzer = struct {
     }
 };
 
-
 ///
 /// generate() constructs a conservative cascade with symmetric logit-normal(sigma) generator
 /// and samples n addresses.
 ///
 /// The caller is responsible for freeing the returned slice.
 ///
-pub fn generate(
-    sigma: f64,
-    n: u32,
-    rand: std.Random,
-    allocator: std.mem.Allocator
-) error{OutOfMemory}!std.ArrayList(struct {u32, f64}) {
+pub fn generate(sigma: f64, n: u32, rand: std.Random, allocator: std.mem.Allocator) error{OutOfMemory}!std.ArrayList(struct { u32, f64 }) {
     const root = Prefix{ .base = 0, .len = 0 };
-    var res = try std.ArrayList(struct{u32, f64}).initCapacity(allocator, n);
+    var res = try std.ArrayList(struct { u32, f64 }).initCapacity(allocator, n);
     const slope: SlopeFitter = .{};
     try gen_rec(sigma, n, root, n, rand, &res, slope);
     return res;
 }
 
-fn gen_rec(
-    sigma: f64,
-    total: u32,
-    pfx: Prefix,
-    n: u32,
-    rand: std.Random,
-    res: *std.ArrayList(struct {u32, f64}),
-    slope: SlopeFitter
-) error{OutOfMemory}!void {
+fn gen_rec(sigma: f64, total: u32, pfx: Prefix, n: u32, rand: std.Random, res: *std.ArrayList(struct { u32, f64 }), slope: SlopeFitter) error{OutOfMemory}!void {
     if (n == 0) {
         return;
     } else if (pfx.len == 32) {
@@ -262,7 +237,7 @@ fn gen_rec(
             const y = -@log2(@as(f64, @floatFromInt(n)) / @as(f64, @floatFromInt(total)));
             slope2.addPoint(x, y);
         }
-        
+
         try gen_rec(sigma, total, left, left_count2, rand, res, slope2);
         try gen_rec(sigma, total, right, right_count2, rand, res, slope2);
     }
@@ -316,23 +291,26 @@ pub const AddrMap = struct {
     /// Constructs an AddrMap from the given lists of (address, alpha(address)) pairs.
     /// The lists end up sorted.
     ///
-    pub fn init(allocator: std.mem.Allocator, from: []struct {u32, f64}, to: []struct {u32, f64}) error{OutOfMemory}!AddrMap {
+    pub fn init(allocator: std.mem.Allocator, rand: std.Random, from: []struct { u32, f64 }, to: []struct { u32, f64 }) error{OutOfMemory}!AddrMap {
         var map = std.AutoHashMap(u32, u32).init(allocator);
-        
+
+        rand.shuffle(struct { u32, f64 }, from);
+        rand.shuffle(struct { u32, f64 }, to);
+
         const comp = struct {
-            fn lt(_: void, l: struct {u32, f64}, r: struct {u32, f64}) bool {
+            fn lt(_: void, l: struct { u32, f64 }, r: struct { u32, f64 }) bool {
                 return l.@"1" < r.@"1";
             }
         }.lt;
         std.mem.sort(struct { u32, f64 }, from, {}, comp);
         std.mem.sort(struct { u32, f64 }, to, {}, comp);
 
-          for (from, to) |f, t| {
-            map.put(f, t);
+        for (from, to) |f, t| {
+            try map.put(f.@"0", t.@"0");
         }
         return AddrMap{ .map = map };
     }
-    
+
     pub fn deinit(self: *AddrMap) void {
         self.map.deinit();
     }
@@ -369,3 +347,25 @@ pub const SlopeFitter = struct {
         return self.c / self.v;
     }
 };
+
+///
+/// Parse the given string as dotted-decimal IPv4
+///
+pub fn string_to_ipv4(str: []const u8) !u32 {
+    var i: u32 = 0;
+    while (str[i] == ' ') i += 1;
+    var s = i;
+    while (str[i] != '.') i += 1;
+    const b1 = try std.fmt.parseUnsigned(u8, str[s..i], 10);
+    i += 1;
+    s = i;
+    while (str[i] != '.') i += 1;
+    const b2 = try std.fmt.parseUnsigned(u8, str[s..i], 10);
+    i += 1;
+    s = i;
+    while (str[i] != '.') i += 1;
+    const b3 = try std.fmt.parseUnsigned(u8, str[s..i], 10);
+    i += 1;
+    const b4 = try std.fmt.parseUnsigned(u8, str[i..str.len], 10);
+    return (@as(u32, b1) << 24) + (@as(u32, b2) << 16) + (@as(u32, b3) << 8) + b4;
+}

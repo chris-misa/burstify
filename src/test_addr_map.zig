@@ -1,7 +1,7 @@
 //! Copyright: 2025 Chris Misa
 //! License: (See ./LICENSE)
 //!
-//! Read a list of IP addresses and do the logit-normal fit
+//! Test the address map
 //!
 
 const std = @import("std");
@@ -39,28 +39,44 @@ pub fn main() !void {
     std.debug.print("sigma = {d:.6}\n", .{sigma});
 
     {
-        var it = pfxs.data[32].keyIterator();
         var alphas: []struct { u32, f64 } = try allocator.alloc(struct { u32, f64 }, pfxs.n());
         defer allocator.free(alphas);
 
         var i: u32 = 0;
+        var it = pfxs.data[32].keyIterator();
         while (it.next()) |x| {
             const alpha = try pfxs.getSingularity(x.*);
             alphas[i] = .{ x.*, alpha };
             i += 1;
         }
-        // std.mem.sort(f64, alphas, {}, comptime std.sort.asc(f64));
-        const comp = struct {
-            fn lt(_: void, l: struct { u32, f64 }, r: struct { u32, f64 }) bool {
-                return l.@"1" < r.@"1";
-            }
-        }.lt;
-        std.mem.sort(struct { u32, f64 }, alphas, {}, comp);
 
-        const mn = alphas[0];
-        const mx = alphas[pfxs.n() - 1];
-        std.debug.print("min alpha = {} for {s}\n", .{ mn.@"1", addr.Prefix{ .base = mn.@"0", .len = 32 } });
-        std.debug.print("max alpha = {} for {s}\n", .{ mx.@"1", addr.Prefix{ .base = mx.@"0", .len = 32 } });
+        var gen = std.Random.DefaultPrng.init(12345);
+        const rand = gen.random();
+
+        const synth_alphas: std.ArrayList(struct { u32, f64 }) = try addr.generate(sigma, count, rand, allocator);
+        defer synth_alphas.deinit();
+
+        var map = try addr.AddrMap.init(allocator, rand, alphas, synth_alphas.items);
+        defer map.deinit();
+
+        std.debug.print("--- smallest alpha ---\n", .{});
+        for (alphas[0..10]) |a| {
+            const image = map.get(a.@"0");
+            if (image) |img| {
+                std.debug.print("{s} -> {s}\n", .{ addr.Prefix{ .base = a.@"0", .len = 32 }, addr.Prefix{ .base = img, .len = 32 } });
+            } else {
+                std.debug.print("no mapping for {s}\n", .{addr.Prefix{ .base = a.@"0", .len = 32 }});
+            }
+        }
+        std.debug.print("--- largest alpha ---\n", .{});
+        for (alphas[count - 11 ..]) |a| {
+            const image = map.get(a.@"0");
+            if (image) |img| {
+                std.debug.print("{s} -> {s}\n", .{ addr.Prefix{ .base = a.@"0", .len = 32 }, addr.Prefix{ .base = img, .len = 32 } });
+            } else {
+                std.debug.print("no mapping for {s}\n", .{addr.Prefix{ .base = a.@"0", .len = 32 }});
+            }
+        }
     }
 }
 
