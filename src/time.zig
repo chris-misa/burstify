@@ -93,13 +93,45 @@ pub const TimeAnalyzer = struct {
     }
 
     ///
-    /// Fits the burst on and off times (separately) over all flows to Pareto distributions.
-    /// Returns the estimated parameter for on and off distributions respectively.
+    /// Fits the burst on and off times (separately) over all flows to Pareto distributions using MLE:
+    /// alpha = n / (sum_i ln(x_i / x_min)).
     ///
-    pub fn pareto_fit(self: TimeAnalyzer) struct {f64, f64} {
-        // TODO
-        // Note: probably only consider durations larger than self.burst_timeout when fitting distribution tail...
-        _ = self;
+    /// Returns the estimated shape parameter for on and off distributions respectively.
+    ///
+    pub fn pareto_fit(self: TimeAnalyzer) error{OutOfMemory}!struct { f64, f64 } {
+        const a_on = a_on_blk: {
+            const on_durs = try self.get_on_durations();
+            defer on_durs.deinit();
+
+            var n: f64 = 0;
+            var m: f64 = 0;
+            for (on_durs.items) |dur| {
+                if (dur >= self.burst_timeout) {
+                    n += 1.0;
+                    const x = @log(dur / self.burst_timeout);
+                    m += (x - m) / n;
+                }
+            }
+            break :a_on_blk (1.0 / m);
+        };
+
+        const a_off = a_off_blk: {
+            const off_durs = try self.get_off_durations();
+            defer off_durs.deinit();
+
+            var n: f64 = 0;
+            var m: f64 = 0;
+            for (off_durs.items) |dur| {
+                if (dur >= self.burst_timeout) {
+                    n += 1.0;
+                    const x = @log(dur / self.burst_timeout);
+                    m += (x - m) / n;
+                }
+            }
+            break :a_off_blk (1.0 / m);
+        };
+
+        return .{ a_on, a_off };
     }
 
     ///

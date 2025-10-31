@@ -79,18 +79,20 @@ fn onePacket(dlt: i32, pcap_hdr: pcap.pcap_pkthdr, pkt: [*c]const u8, analyzer: 
 }
 
 fn finish(analyzer: *time.TimeAnalyzer) !void {
-    const on_durs = try analyzer.get_on_durations();
-    defer on_durs.deinit();
-
-    const off_durs = try analyzer.get_off_durations();
-    defer off_durs.deinit();
-
-    const stdout = std.io.getStdOut().writer();
-    try stdout.print("label,dur\n", .{});
-    for (on_durs.items) |dur| {
-        try stdout.print("on,{d:.6}\n", .{dur});
-    }
-    for (off_durs.items) |dur| {
-        try stdout.print("off,{d:.6}\n", .{dur});
-    }
+    const a_on, const a_off = try analyzer.pareto_fit();
+    std.debug.print("a_on = {d}, a_off = {d}\n", .{ a_on, a_off });
+    // const on_durs = try analyzer.get_on_durations();
+    // defer on_durs.deinit();
+    //
+    // const off_durs = try analyzer.get_off_durations();
+    // defer off_durs.deinit();
+    //
+    // const stdout = std.io.getStdOut().writer();
+    // try stdout.print("label,dur\n", .{});
+    // for (on_durs.items) |dur| {
+    //     try stdout.print("on,{d:.6}\n", .{dur});
+    // }
+    // for (off_durs.items) |dur| {
+    //     try stdout.print("off,{d:.6}\n", .{dur});
+    // }
 }
