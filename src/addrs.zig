@@ -224,7 +224,7 @@ fn gen_rec(sigma: f64, total: u32, pfx: Prefix, n: u32, rand: std.Random, res: *
         try res.append(.{ pfx.base, alpha });
     } else {
         const normal: f64 = rand.floatNorm(f64) * sigma;
-        const w: f64 = 1.0 / (1 + @exp(-normal));
+        const w: f64 = 1.0 / (1 + @exp(-normal)); // w ~ logit-normal(sigma)
         const left_count: u32 = @intFromFloat(@round(@as(f64, @floatFromInt(n)) * w));
         const right_count: u32 = @intFromFloat(@round(@as(f64, @floatFromInt(n)) * (1.0 - w)));
         const left = Prefix{ .base = pfx.base, .len = pfx.len + 1 };

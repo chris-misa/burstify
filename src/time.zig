@@ -166,8 +166,10 @@ pub const TimeAnalyzer = struct {
     }
 };
 
-pub fn generate(a_on: f64, a_off: f64, num_bursts: u32) std.ArrayList(struct { f64, f64 }) {
+pub fn generate(a_on: f64, a_off: f64, num_bursts: u32, rand: std.Random, allocator: std.mem.Allocator) std.ArrayList(struct { f64, f64 }) {
     // TODO
+
+    // ...
     _ = a_on;
     _ = a_off;
     _ = num_bursts;
