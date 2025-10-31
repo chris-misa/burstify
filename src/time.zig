@@ -59,6 +59,7 @@ pub const TimeAnalyzer = struct {
             for (bursts.items) |*burst| {
                 burst.deinit();
             }
+            bursts.deinit();
         }
         self.flows.deinit();
     }
@@ -86,7 +87,7 @@ pub const TimeAnalyzer = struct {
             var new_burst = Burst.init(self.allocator, time);
             try new_burst.packets.append(pkt);
             var bursts = std.ArrayList(Burst).init(self.allocator);
-            try bursts.append(new_burst);
+            try bursts.append(new_burst); // LEAK
             try self.flows.put(key, bursts);
         }
     }
