@@ -86,11 +86,12 @@ fn onePacket(dlt: i32, pcap_hdr: pcap.pcap_pkthdr, pkt: [*c]const u8, analyzer: 
     }
 }
 
-fn finish(analyzer: *time.TimeAnalyzer) error{OutOfMemory}!void {
+fn finish(analyzer: *time.TimeAnalyzer) !void {
     const on_durs = try analyzer.get_on_durations();
     defer on_durs.deinit();
-    
+
+    const stdout = std.io.getStdOut().writer();
     for (on_durs.items) |dur| {
-        std.debug.print("{}\n", .{ dur });
+        try stdout.print("{}\n", .{ dur });
     }
 }
