@@ -64,7 +64,6 @@ fn onePacket(dlt: i32, pcap_hdr: pcap.pcap_pkthdr, pkt: [*c]const u8, analyzer: 
 
     // Only look at ipv4 packets (for now)
     if (p.ipv4) |ipv4| {
-
         const t: f64 =
             @as(f64, @floatFromInt(pcap_hdr.ts.tv_sec)) +
             @as(f64, @floatFromInt(pcap_hdr.ts.tv_usec)) / 1000000.0;
@@ -74,14 +73,7 @@ fn onePacket(dlt: i32, pcap_hdr: pcap.pcap_pkthdr, pkt: [*c]const u8, analyzer: 
         const tcpflags = if (p.tcp) |tcp| tcp.flags else 0;
 
         const key = time.FlowKey{ .saddr = ipv4.saddr, .daddr = ipv4.daddr };
-        const packet = time.Packet{
-            .time = t,
-            .sport = @byteSwap(sport),
-            .dport = @byteSwap(dport),
-            .proto = ipv4.protocol,
-            .len = @byteSwap(ipv4.tot_len),
-            .tcpflags = tcpflags
-        };
+        const packet = time.Packet{ .time = t, .sport = @byteSwap(sport), .dport = @byteSwap(dport), .proto = ipv4.protocol, .len = @byteSwap(ipv4.tot_len), .tcpflags = tcpflags };
         try analyzer.addPkt(key, packet);
     }
 }
@@ -90,8 +82,15 @@ fn finish(analyzer: *time.TimeAnalyzer) !void {
     const on_durs = try analyzer.get_on_durations();
     defer on_durs.deinit();
 
+    const off_durs = try analyzer.get_off_durations();
+    defer off_durs.deinit();
+
     const stdout = std.io.getStdOut().writer();
+    try stdout.print("label,dur\n", .{});
     for (on_durs.items) |dur| {
-        try stdout.print("{}\n", .{ dur });
+        try stdout.print("on,{d:.6}\n", .{dur});
+    }
+    for (off_durs.items) |dur| {
+        try stdout.print("off,{d:.6}\n", .{dur});
     }
 }

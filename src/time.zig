@@ -98,15 +98,36 @@ pub const TimeAnalyzer = struct {
     ///
     pub fn pareto_fit(self: TimeAnalyzer) struct {f64, f64} {
         // TODO
+        // Note: probably only consider durations larger than self.burst_timeout when fitting distribution tail...
         _ = self;
     }
 
+    ///
+    /// Return a ArrayList of on-durations
+    /// Caller is responsible for calling ArrayList.deinit()
+    ///
     pub fn get_on_durations(self: TimeAnalyzer) error{OutOfMemory}!std.ArrayList(f64) {
         var res = std.ArrayList(f64).init(self.allocator);
         var it = self.flows.valueIterator();
         while (it.next()) |bursts| {
             for (bursts.items) |burst| {
                 try res.append(burst.end_time - burst.start_time);
+            }
+        }
+        return res;
+    }
+
+    ///
+    /// Return a ArrayList of off-durations
+    /// Caller is responsible for calling ArrayList.deinit()
+    ///
+    pub fn get_off_durations(self: TimeAnalyzer) error{OutOfMemory}!std.ArrayList(f64) {
+        var res = std.ArrayList(f64).init(self.allocator);
+        var it = self.flows.valueIterator();
+        while (it.next()) |bursts| {
+            for (0..bursts.items.len - 1) |i| {
+                const dt = bursts.items[i + 1].start_time - bursts.items[i].end_time;
+                try res.append(dt);
             }
         }
         return res;
