@@ -166,11 +166,36 @@ pub const TimeAnalyzer = struct {
     }
 };
 
-pub fn generate(a_on: f64, a_off: f64, num_bursts: u32, rand: std.Random, allocator: std.mem.Allocator) std.ArrayList(struct { f64, f64 }) {
+///
+/// Generate a sequence of num_bursts bursts, denoted by start_time, end_time tuples that
+/// have Pareto on and off times with the specified shape parameters and are clamped to
+/// fill the given duration (in seconds).
+///
+pub fn generate(
+    a_on: f64,
+    m_on: f64,
+    a_off: f64,
+    m_off: f64,
+    num_bursts: u32,
+    duration: f64,
+    rand: std.Random,
+    allocator: std.mem.Allocator
+) std.ArrayList(struct { f64, f64 }) {
     // TODO
+    // ---> Do we also need to specify the minimum value for the Pareto distributions?
 
     // ...
     _ = a_on;
+    _ = m_on;
     _ = a_off;
+    _ = m_off;
     _ = num_bursts;
+    _ = duration;
+    _ = rand;
+    _ = allocator;
+    return .{0.0, 0.0};
+}
+
+pub fn pareto(a: f64, m: f64, rand: std.Random) f64 {
+    return m * @exp(rand.floatExp(f64) / a);
 }
