@@ -11,30 +11,12 @@ const pcap = @cImport(@cInclude("pcap/pcap.h"));
 const hdr = @import("parse_headers.zig");
 const addr = @import("addrs.zig");
 const time = @import("time.zig");
-
-///
-/// Parameters controlling the time-domain process
-///
-const TimeParameters = struct {
-    a_on: f64, // shape parameter of the on-period Pareto distribution
-    m_on: f64, // position parameter of the on-period Pareto distribution
-    a_off: f64, // shape parameter of the off-period Pareto distribution
-    m_off: f64, // position parameter of the off-period Pareto distribution
-    total_duration: f64, // total duration of the output trace
-};
-
-///
-/// Parameters controlling the address space-domain process
-///
-const AddrParameters = struct {
-    src_sigma: f64, // parameter of the logit-normal generator in the source address cascade
-    dst_sigma: f64, // parameter of the logit-normal generator in the destination address cascade
-};
+const gen = @import("generator.zig");
 
 const Target = struct {
     output_pcap: []u8, // Name of the output generated from this target
-    time: TimeParameters,
-    addr: AddrParameters,
+    time: gen.TimeParameters,
+    addr: gen.AddrParameters,
 };
     
 
@@ -62,8 +44,8 @@ pub fn main() !void {
         if (deinit_status == .leak) @panic("TEST FAIL: leaked memory");
     }
 
-    var gen = std.Random.DefaultPrng.init(12345);
-    const rand = gen.random();
+    var rand_gen = std.Random.DefaultPrng.init(12345);
+    const rand = rand_gen.random();
 
     // Read config
     const config_file = try std.fs.cwd().readFileAlloc(allocator, config_filepath, 4096);
@@ -82,27 +64,15 @@ pub fn main() !void {
     for (config.value.targets) |target| {
         std.debug.print("Executing target {s}\n", .{ target.output_pcap });
 
-        // Create the source and destination address mappings
-        var src_map = try get_addr_map(
+        var generator = try gen.Generator.init(
             allocator,
             rand,
-            flows.flows,
-            struct { fn f(k: time.FlowKey) u32 { return k.saddr; } }.f,
-            target.addr.src_sigma
+            &flows,
+            target.time,
+            target.addr
         );
-        defer src_map.deinit();
-        
-        var dst_map = try get_addr_map(
-            allocator,
-            rand,
-            flows.flows,
-            struct { fn f(k: time.FlowKey) u32 { return k.daddr; } }.f,
-            target.addr.src_sigma
-        );
-        defer dst_map.deinit();
+        defer generator.deinit();
 
-        // TODO: Build a new thing (organize by first timestamp of each flow)
-        // TODO: For each flow in flows, map the source and dest
 
         // ... just try the time mapping for now...
         const burst_outfile_name = try std.mem.concat(
@@ -150,45 +120,6 @@ pub fn main() !void {
     }
 }
 
-fn get_addr_map(
-    allocator: std.mem.Allocator,
-    rand: std.Random,
-    flows: time.FlowMap,
-    comptime project: fn (time.FlowKey) u32,
-    sigma: f64
-) (error{OutOfMemory} || addr.AddrAnalyzerError)!addr.AddrMap {
-
-    // Collect distinct addresses from flows
-    var addrs = try addr.AddrAnalyzer.init(allocator);
-    defer addrs.deinit();
-    {
-        var it = flows.keyIterator();
-        while (it.next()) |k| {
-            try addrs.addAddr(project(k.*));
-        }
-    }
-    try addrs.prefixify();
-
-    // Get singular scaling exponents
-    var from_addrs = try allocator.alloc(struct { u32, f64 }, addrs.n());
-    defer allocator.free(from_addrs);
-    {
-        var it = addrs.data[32].keyIterator();
-        var i: u32 = 0;
-        while (it.next()) |x| {
-            const alpha = try addrs.getSingularity(x.*);
-            from_addrs[i] = .{ x.*, alpha };
-            i += 1;
-        }
-    }
-
-    // Generate synthetic addresses at target sigma
-    var to_addrs = try addr.generate(sigma, @intCast(addrs.n()), rand, allocator);
-    defer to_addrs.deinit();
-
-    // Create map
-    return addr.AddrMap.init(allocator, rand, from_addrs, to_addrs.items);
-}
 
 fn read_pcap(filename: []u8, allocator: std.mem.Allocator) error{OutOfMemory}!?time.TimeAnalyzer {
     
