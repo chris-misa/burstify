@@ -167,33 +167,65 @@ pub const TimeAnalyzer = struct {
 };
 
 ///
-/// Generate a sequence of num_bursts bursts, denoted by start_time, end_time tuples that
+/// Generate a sequence of bursts, denoted by {start_time, end_time, num_packets} tuples that
 /// have Pareto on and off times with the specified shape parameters and are clamped to
-/// fill the given duration (in seconds).
+/// fill the given duration (in seconds) and contain the total number of packets.
+///
+/// Caller is responsible for calling deinit() on the result.
 ///
 pub fn generate(
     a_on: f64,
     m_on: f64,
     a_off: f64,
     m_off: f64,
-    num_bursts: u32,
-    duration: f64,
+    total_packets: u32,
+    total_duration: f64,
     rand: std.Random,
     allocator: std.mem.Allocator
-) std.ArrayList(struct { f64, f64 }) {
-    // TODO
-    // ---> Do we also need to specify the minimum value for the Pareto distributions?
+) error{OutOfMemory}!std.ArrayList(struct { f64, f64, u32 }) {
 
-    // ...
-    _ = a_on;
-    _ = m_on;
-    _ = a_off;
-    _ = m_off;
-    _ = num_bursts;
-    _ = duration;
-    _ = rand;
-    _ = allocator;
-    return .{0.0, 0.0};
+    if (m_off >= total_duration) {
+        std.debug.print("Calling time.generate() with minimum off period longer than total duration ({d} >= {d})...would loop forever.\n", .{m_off, total_duration});
+        @panic("Bad arguments to time.generate()");
+    }
+
+    var res = try std.ArrayList(struct { f64, f64, u32 }).initCapacity(allocator, 1);
+
+    // Advance over initial off period, making sure it's shorter than total duration
+    var cur: f64 = pareto(a_off, m_off, rand);
+    while (cur >= total_duration) {
+        cur = pareto(a_off, m_off, rand);
+    }
+
+    // Advance over the rest of duration
+    var total_on: f64 = 0.0;
+    while (cur < total_duration) {
+        const on_dur = pareto(a_on, m_on, rand);
+        total_on += on_dur;
+        const off_dur = pareto(a_off, m_off, rand);
+        try res.append(.{cur, cur + on_dur, 0});
+        cur += on_dur;
+        cur += off_dur;
+    }
+
+    // Compute mean packet rate and fill in packets per burst
+    // Quantize to total on dur * packet rate to ensure total_packets is preserved
+    const pkts_per_sec = @as(f64, @floatFromInt(total_packets)) / total_on;
+    var on_pos: f64 = 0.000000001;
+    for (res.items) |*burst| {
+        const off_pos = on_pos + (burst.*.@"1" - burst.*.@"0");
+
+        const on_pos_pkts = on_pos * pkts_per_sec;
+        const off_pos_pkts = off_pos * pkts_per_sec;
+        
+        const pkts: u32 = @as(u32, @intFromFloat(@floor(off_pos_pkts)))
+            - @as(u32, @intFromFloat(@floor(on_pos_pkts)));
+        
+        burst.*.@"2" = pkts;
+        on_pos = off_pos;
+    }
+    
+    return res;
 }
 
 pub fn pareto(a: f64, m: f64, rand: std.Random) f64 {
