@@ -80,7 +80,7 @@ pub fn main() !void {
     std.debug.print("Read {d} flows\n", .{ flows.flows.count() });
 
     for (config.value.targets) |target| {
-        std.debug.print("Executing target for {s}\n", .{ target.output_pcap });
+        std.debug.print("Executing target {s}\n", .{ target.output_pcap });
 
         // Create the source and destination address mappings
         var src_map = try get_addr_map(
@@ -134,15 +134,14 @@ pub fn main() !void {
                     rand,
                     allocator
                 );
-                defer synth_bursts.deinit();
-                for (synth_bursts.items) |burst| {
-                    if (burst.@"2" > 0) {
-                        try burst_out.print("on,{d},{d}\n", .{burst.@"1" - burst.@"0", burst.@"2"});
-                    }
+                defer allocator.free(synth_bursts);
+                
+                for (synth_bursts) |burst| {
+                    try burst_out.print("on,{d},{d}\n", .{burst.@"1" - burst.@"0", burst.@"2"});
                 }
-                for (0..synth_bursts.items.len - 1) |i| {
+                for (0..synth_bursts.len - 1) |i| {
                     try burst_out.print("off,{d},0\n", .{
-                        synth_bursts.items[i + 1].@"0" - synth_bursts.items[i].@"1"
+                        synth_bursts[i + 1].@"0" - synth_bursts[i].@"1"
                     });
                 }
             }

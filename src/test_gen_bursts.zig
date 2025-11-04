@@ -26,12 +26,12 @@ pub fn main() !void {
     const rand = gen.random();
 
     const bursts = try time.generate(1.2, 0.01, 0.4, 0.01, total_packets, total_duration, rand, allocator);
-    defer bursts.deinit();
+    defer allocator.free(bursts);
 
     const stdout = std.io.getStdOut().writer();
 
     try stdout.print("start_time,end_time,pkts\n", .{});
-    for (bursts.items) |burst| {
+    for (bursts) |burst| {
         try stdout.print("{d},{d},{d}\n", .{burst.@"0", burst.@"1", burst.@"2"});
     }
 }

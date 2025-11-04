@@ -171,7 +171,7 @@ pub const TimeAnalyzer = struct {
 /// have Pareto on and off times with the specified shape parameters and are clamped to
 /// fill the given duration (in seconds) and contain the total number of packets.
 ///
-/// Caller is responsible for calling deinit() on the result.
+/// Caller is responsible for freeing the result.
 ///
 pub fn generate(
     a_on: f64,
@@ -182,7 +182,7 @@ pub fn generate(
     total_duration: f64,
     rand: std.Random,
     allocator: std.mem.Allocator
-) error{OutOfMemory}!std.ArrayList(struct { f64, f64, u32 }) {
+) error{OutOfMemory}![]struct { f64, f64, u32 } {
 
     if (m_off >= total_duration) {
         std.debug.print("Calling time.generate() with minimum off period longer than total duration ({d} >= {d})...would loop forever.\n", .{m_off, total_duration});
@@ -190,6 +190,7 @@ pub fn generate(
     }
 
     var res = try std.ArrayList(struct { f64, f64, u32 }).initCapacity(allocator, 1);
+    defer res.deinit();
 
     // Advance over initial off period, making sure it's shorter than total duration
     var cur: f64 = pareto(a_off, m_off, rand);
@@ -215,6 +216,7 @@ pub fn generate(
     // Quantize to total on dur * packet rate to ensure total_packets is preserved
     const pkts_per_sec = @as(f64, @floatFromInt(total_packets)) / total_on;
     var on_pos: f64 = 0.000000001;
+    var nonzero_count: u32 = 0;
     for (res.items) |*burst| {
         const off_pos = on_pos + (burst.*.@"1" - burst.*.@"0");
 
@@ -226,9 +228,23 @@ pub fn generate(
         
         burst.*.@"2" = pkts;
         on_pos = off_pos;
+
+        if (pkts > 0) {
+            nonzero_count += 1;
+        }
+    }
+
+    // Write the non-zero results into the output
+    var output = try allocator.alloc(struct { f64, f64, u32 }, nonzero_count);
+    var i: u32 = 0;
+    for (res.items) |burst| {
+        if (burst.@"2" > 0) {
+            output[i] = burst;
+            i += 1;
+        }
     }
     
-    return res;
+    return output;
 }
 
 pub fn pareto(a: f64, m: f64, rand: std.Random) f64 {
