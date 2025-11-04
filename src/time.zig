@@ -200,7 +200,10 @@ pub fn generate(
     // Advance over the rest of duration
     var total_on: f64 = 0.0;
     while (cur < total_duration) {
-        const on_dur = pareto(a_on, m_on, rand);
+        var on_dur = pareto(a_on, m_on, rand);
+        if (cur + on_dur > total_duration) {
+            on_dur = total_duration - cur;
+        }
         total_on += on_dur;
         const off_dur = pareto(a_off, m_off, rand);
         try res.append(.{cur, cur + on_dur, 0});

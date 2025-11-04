@@ -44,7 +44,6 @@ const Config = struct {
 
     src_out: bool, // write extra output file with list of source addresses
     dst_out: bool, // write extra output file with list of destination addresses
-
     burst_out: bool, // write extra output file with start, end, and number of packets of each burst
 };
 
@@ -102,8 +101,52 @@ pub fn main() !void {
         );
         defer dst_map.deinit();
 
-        // Build a new thing (organize by first timestamp of each flow)
-        // For each flow in flows, map the source and dest
+        // TODO: Build a new thing (organize by first timestamp of each flow)
+        // TODO: For each flow in flows, map the source and dest
+
+        // ... just try the time mapping for now...
+        const burst_outfile_name = try std.mem.concat(
+            allocator,
+            u8,
+            &[_][]const u8{target.output_pcap, ".bursts.csv"}
+        );
+        defer allocator.free(burst_outfile_name);
+        const burst_outfile = try std.fs.cwd().createFile(burst_outfile_name, .{});
+        defer burst_outfile.close();
+        const burst_out = burst_outfile.writer();
+        try burst_out.print("label,dur,pkts\n", .{});
+        {
+            var it = flows.flows.iterator();
+            while (it.next()) |elem| {
+                const bursts = elem.value_ptr; // std.ArrayList(Burst)
+                // Count the number of packets...
+                var pkts: usize = 0;
+                for (bursts.items) |burst| {
+                    pkts += burst.packets.items.len;
+                }
+                const synth_bursts = try time.generate(
+                    target.time.a_on,
+                    target.time.m_on,
+                    target.time.a_off,
+                    target.time.m_off,
+                    @intCast(pkts),
+                    target.time.total_duration,
+                    rand,
+                    allocator
+                );
+                defer synth_bursts.deinit();
+                for (synth_bursts.items) |burst| {
+                    if (burst.@"2" > 0) {
+                        try burst_out.print("on,{d},{d}\n", .{burst.@"1" - burst.@"0", burst.@"2"});
+                    }
+                }
+                for (0..synth_bursts.items.len - 1) |i| {
+                    try burst_out.print("off,{d},0\n", .{
+                        synth_bursts.items[i + 1].@"0" - synth_bursts.items[i].@"1"
+                    });
+                }
+            }
+        }
         
     }
 }
