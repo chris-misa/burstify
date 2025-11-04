@@ -1,0 +1,22 @@
+{
+    "input_pcap": "test_data/dirA.first500k.pcap",
+    "targets": [
+        {
+            "output_pcap": "test_out1.pcap",
+            "time": {
+                "a_on": 1.2,
+                "m_on": 0.01,
+                "a_off": 0.4,
+                "m_off": 0.01,
+                "total_duration": 5.0
+            },
+            "addr": {
+                "src_sigma": 1.2,
+                "dst_sigma": 1.2
+            }
+        }
+    ],
+    "src_out": true,
+    "dst_out": true,
+    "burst_out": true
+}

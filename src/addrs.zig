@@ -17,7 +17,7 @@ pub const Prefix = struct {
     }
 };
 
-const AddrAnalyzerError = error{AddingToAlreadyBuiltMap};
+pub const AddrAnalyzerError = error{AddingToAlreadyBuiltMap};
 
 ///
 /// AddrAnalyzer accumulates addresses (using AddrAnalyzer.addAddr()) then forms the prefix tree of cascade structure.
@@ -165,7 +165,7 @@ pub const AddrAnalyzer = struct {
     /// Form the prefix map for the addresses already added.
     /// Returns the total number of addresses.
     ///
-    fn prefixify(self: *AddrAnalyzer) error{OutOfMemory}!void {
+    pub fn prefixify(self: *AddrAnalyzer) error{OutOfMemory}!void {
         const m = self.*.data;
         // Sum children, bottom-up
         for (0..32) |i| {
@@ -291,7 +291,12 @@ pub const AddrMap = struct {
     /// Constructs an AddrMap from the given lists of (address, alpha(address)) pairs.
     /// The lists end up sorted.
     ///
-    pub fn init(allocator: std.mem.Allocator, rand: std.Random, from: []struct { u32, f64 }, to: []struct { u32, f64 }) error{OutOfMemory}!AddrMap {
+    pub fn init(
+        allocator: std.mem.Allocator,
+        rand: std.Random,
+        from: []struct { u32, f64 },
+        to: []struct { u32, f64 }
+    ) error{OutOfMemory}!AddrMap {
         var map = std.AutoHashMap(u32, u32).init(allocator);
 
         rand.shuffle(struct { u32, f64 }, from);
