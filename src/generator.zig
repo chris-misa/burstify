@@ -1,0 +1,292 @@
+//! Copyright: 2025 Chris Misa
+//! License: (See ./LICENSE)
+//!
+//! Combine the addr and time capabilities to generate packet-level traces
+//!
+
+const std = @import("std");
+
+const addr = @import("addrs.zig");
+const time = @import("time.zig");
+
+///
+/// Parameters controlling the time-domain process
+///
+pub const TimeParameters = struct {
+    a_on: f64, // shape parameter of the on-period Pareto distribution
+    m_on: f64, // position parameter of the on-period Pareto distribution
+    a_off: f64, // shape parameter of the off-period Pareto distribution
+    m_off: f64, // position parameter of the off-period Pareto distribution
+    total_duration: f64, // total duration of the output trace
+};
+
+///
+/// Parameters controlling the address space-domain process
+///
+pub const AddrParameters = struct {
+    src_sigma: f64, // parameter of the logit-normal generator in the source address cascade
+    dst_sigma: f64, // parameter of the logit-normal generator in the destination address cascade
+};
+
+const Burst = struct {
+    key: time.FlowKey,
+    start_time: f64,
+    end_time: f64,
+    packets: std.ArrayList(time.Packet),
+    cur_pkt_idx: usize,
+
+    pub fn init(
+        key: time.FlowKey,
+        start_time: f64,
+        end_time: f64,
+        packets: std.ArrayList(time.Packet)
+    ) Burst {
+        return Burst{
+            .key = key,
+            .start_time = start_time,
+            .end_time = end_time,
+            .packets = packets,
+            .cur_pkt_idx = 0
+        };
+    }
+    pub fn deinit(self: *Burst) void {
+        self.packets.deinit();
+    }
+
+    pub fn compare(context: void, l: Burst, r: Burst) std.math.Order {
+        _ = context;
+        return std.math.order(l.start_time, r.start_time);
+    }
+};
+
+const BurstQueue = std.PriorityQueue(Burst, void, Burst.compare);
+
+///
+/// Generator definition
+/// 
+pub const Generator = struct {
+    params: struct {
+        time: TimeParameters,
+        addr: AddrParameters,
+    },
+
+    src_map: addr.AddrMap,
+    dst_map: addr.AddrMap,
+
+    input_flows: *const time.TimeAnalyzer,
+    bursts: BurstQueue,
+    active_bursts: BurstQueue,
+
+    allocator: std.mem.Allocator,
+    rand: std.Random,
+
+    ///
+    /// Create a new Generator.
+    /// Note that the Generator only holds a pointer to the TimeAnalyzer and does not manage it's memory.
+    ///
+    pub fn init(
+        allocator: std.mem.Allocator,
+        rand: std.Random,
+        flows: *time.TimeAnalyzer,
+        time_params: TimeParameters,
+        addr_params: AddrParameters
+    ) (error{OutOfMemory} || addr.AddrAnalyzerError)!Generator {
+
+        const src_map = try get_addr_map(
+            allocator,
+            rand,
+            &flows.flows,
+            struct { fn f(k: time.FlowKey) u32 { return k.saddr; } }.f,
+            addr_params.src_sigma
+        );
+        
+        const dst_map = try get_addr_map(
+            allocator,
+            rand,
+            &flows.flows,
+            struct { fn f(k: time.FlowKey) u32 { return k.daddr; } }.f,
+            addr_params.dst_sigma
+        );
+
+        var bursts = try generate_bursts(
+            allocator,
+            rand,
+            &flows.flows,
+            time_params
+        );
+
+        var active_bursts = BurstQueue.init(allocator, {});
+
+        const first_burst = bursts.remove();
+        try active_bursts.add(first_burst);
+
+        return Generator{
+            .params = .{
+                .time = time_params,
+                .addr = addr_params
+            },
+            .src_map = src_map,
+            .dst_map = dst_map,
+            .input_flows = flows,
+            .bursts = bursts,
+            .active_bursts = active_bursts,
+
+            .allocator = allocator,
+            .rand = rand
+        };
+    }
+
+    pub fn deinit(self: *Generator) void {
+        self.src_map.deinit();
+        self.dst_map.deinit();
+        self.bursts.deinit();
+        self.active_bursts.deinit();
+    }
+
+    pub fn nextPacket(self: *Generator) error{OutOfMemory}!?struct { time.FlowKey, time.Packet } {
+
+        var next_active = blk: {
+            if (self.active_bursts.peek()) |active| {
+                if (self.bursts.peek()) |next| {
+                    if (next.start_time < active.start_time) {
+                        // Take next from self.bursts, leave active on self.active_bursts
+                        break :blk self.bursts.remove();
+                    } else {
+                        // Take active from self.active_bursts, leave next on self.bursts
+                        break :blk self.active_bursts.remove();
+                    }
+                } else {
+                    break :blk self.active_bursts.remove();
+                }
+            } else if (self.bursts.peek()) |next| {
+                _ = next;
+                break :blk self.bursts.remove();
+            } else {
+                return null;
+            }
+        };
+        
+        // Extract the packet
+        const pkt = next_active.packets.items[next_active.cur_pkt_idx];
+
+        // Advance the burst's pointer
+        next_active.cur_pkt_idx += 1;
+
+        // Push the burst back on active_bursts if it's not done.
+        if (next_active.cur_pkt_idx < next_active.packets.items.len) {
+            next_active.start_time = next_active.packets.items[next_active.cur_pkt_idx].time;
+            try self.active_bursts.add(next_active);
+        } else {
+            next_active.deinit();
+        }
+        return .{ next_active.key, pkt };
+    }
+};
+
+fn get_addr_map(
+    allocator: std.mem.Allocator,
+    rand: std.Random,
+    flows: *time.FlowMap,
+    comptime project: fn (time.FlowKey) u32,
+    sigma: f64
+) (error{OutOfMemory} || addr.AddrAnalyzerError)!addr.AddrMap {
+
+    // Collect distinct addresses from flows
+    var addrs = try addr.AddrAnalyzer.init(allocator);
+    defer addrs.deinit();
+    {
+        var it = flows.keyIterator();
+        while (it.next()) |k| {
+            try addrs.addAddr(project(k.*));
+        }
+    }
+    try addrs.prefixify();
+
+    // Get singular scaling exponents
+    var from_addrs = try allocator.alloc(struct { u32, f64 }, addrs.n());
+    defer allocator.free(from_addrs);
+    {
+        var it = addrs.data[32].keyIterator();
+        var i: u32 = 0;
+        while (it.next()) |x| {
+            const alpha = try addrs.getSingularity(x.*);
+            from_addrs[i] = .{ x.*, alpha };
+            i += 1;
+        }
+    }
+
+    // Generate synthetic addresses at target sigma
+    var to_addrs = try addr.generate(sigma, @intCast(addrs.n()), rand, allocator);
+    defer to_addrs.deinit();
+
+    // Create map
+    return addr.AddrMap.init(allocator, rand, from_addrs, to_addrs.items);
+}
+
+
+fn generate_bursts(
+    allocator: std.mem.Allocator,
+    rand: std.Random,
+    flows: *time.FlowMap,
+    time_params: TimeParameters,
+) error{OutOfMemory}!BurstQueue {
+
+    var bursts = BurstQueue.init(allocator, {});
+
+    var it = flows.iterator();
+    while (it.next()) |elem| {
+
+        // Count total packets
+        var pkts: usize = 0;
+        const input_bursts = elem.value_ptr.items;
+        for (input_bursts) |burst| {
+            pkts += burst.packets.items.len;
+        }
+
+        // Generate synth bursts
+        const synth_bursts = try time.generate(
+            time_params.a_on,
+            time_params.m_on,
+            time_params.a_off,
+            time_params.m_off,
+            @intCast(pkts),
+            time_params.total_duration,
+            rand,
+            allocator
+        );
+        defer allocator.free(synth_bursts);
+
+        // Copy packets from this flow into synth bursts
+        var input_burst_idx: u32 = 0;
+        var input_pkt_idx: u32 = 0;
+        for (synth_bursts) |burst| {
+            var packets = std.ArrayList(time.Packet).init(allocator);
+
+            const num_pkts_f = @as(f64, @floatFromInt(burst.@"2"));
+            for (0..burst.@"2") |i| {
+                if (input_burst_idx >= input_bursts.len) {
+                    @panic("Ran out of input bursts!");
+                }
+                var pkt = input_bursts[input_burst_idx].packets.items[input_pkt_idx];
+                input_pkt_idx += 1;
+                if (input_pkt_idx >= input_bursts[input_burst_idx].packets.items.len) {
+                    input_pkt_idx = 0;
+                    input_burst_idx += 1;
+                }
+                const i_f = @as(f64, @floatFromInt(i));
+                pkt.time = burst.@"0" + i_f * (burst.@"1" - burst.@"0") / num_pkts_f; // Distribute packets uniformly over burst duration
+                try packets.append(pkt);
+            }
+
+            const new_burst = Burst.init(
+                elem.key_ptr.*,
+                burst.@"0",
+                burst.@"1",
+                packets
+            );
+            try bursts.add(new_burst);
+        }
+    }
+    
+    return bursts;
+}

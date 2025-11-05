@@ -17,6 +17,15 @@ pub const Prefix = struct {
     }
 };
 
+pub const Addr = struct {
+    base: u32,
+    pub fn format(self: Addr, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+        _ = fmt;
+        _ = options;
+        try writer.print("{d}.{d}.{d}.{d}", .{ (self.base >> 24) & 0xFF, (self.base >> 16) & 0xFF, (self.base >> 8) & 0xFF, self.base & 0xFF });
+    }
+};
+
 pub const AddrAnalyzerError = error{AddingToAlreadyBuiltMap};
 
 ///
