@@ -81,7 +81,6 @@ pub fn main() !void {
 
         try out.print("time,saddr,daddr,sport,dport,proto,len,tcpflags\n", .{});
         while (try generator.nextPacket()) |pkt| {
-            // pkt: struct { time.FlowKey, time.Packet }
             const key = pkt.@"0";
             const bdy = pkt.@"1";
             try out.print("{d},{s},{s},{d},{d},{d},{d},{d}\n", .{

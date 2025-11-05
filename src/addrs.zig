@@ -215,9 +215,16 @@ pub const AddrAnalyzer = struct {
 /// generate() constructs a conservative cascade with symmetric logit-normal(sigma) generator
 /// and samples n addresses.
 ///
+/// Returned elements are { address, alpha(address) } tuples.
+///
 /// The caller is responsible for freeing the returned slice.
 ///
-pub fn generate(sigma: f64, n: u32, rand: std.Random, allocator: std.mem.Allocator) error{OutOfMemory}!std.ArrayList(struct { u32, f64 }) {
+pub fn generate(
+    sigma: f64,
+    n: u32,
+    rand: std.Random,
+    allocator: std.mem.Allocator
+) error{OutOfMemory}!std.ArrayList(struct { u32, f64 }) {
     const root = Prefix{ .base = 0, .len = 0 };
     var res = try std.ArrayList(struct { u32, f64 }).initCapacity(allocator, n);
     const slope: SlopeFitter = .{};
@@ -225,7 +232,15 @@ pub fn generate(sigma: f64, n: u32, rand: std.Random, allocator: std.mem.Allocat
     return res;
 }
 
-fn gen_rec(sigma: f64, total: u32, pfx: Prefix, n: u32, rand: std.Random, res: *std.ArrayList(struct { u32, f64 }), slope: SlopeFitter) error{OutOfMemory}!void {
+fn gen_rec(
+    sigma: f64,
+    total: u32,
+    pfx: Prefix,
+    n: u32,
+    rand: std.Random,
+    res: *std.ArrayList(struct { u32, f64 }),
+    slope: SlopeFitter
+) error{OutOfMemory}!void {
     if (n == 0) {
         return;
     } else if (pfx.len == 32) {
