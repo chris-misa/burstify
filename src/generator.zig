@@ -111,6 +111,8 @@ pub const Generator = struct {
         var bursts = try generate_bursts(
             allocator,
             rand,
+            src_map,
+            dst_map,
             &flows.flows,
             time_params
         );
@@ -183,6 +185,9 @@ pub const Generator = struct {
     }
 };
 
+///
+/// Create AddrMap for field determined by project of all flows in flows
+///
 fn get_addr_map(
     allocator: std.mem.Allocator,
     rand: std.Random,
@@ -223,10 +228,14 @@ fn get_addr_map(
     return addr.AddrMap.init(allocator, rand, from_addrs, to_addrs.items);
 }
 
-
+///
+/// Generate synthetic bursts and collect in a BurstQueue
+///
 fn generate_bursts(
     allocator: std.mem.Allocator,
     rand: std.Random,
+    src_map: addr.AddrMap,
+    dst_map: addr.AddrMap,
     flows: *time.FlowMap,
     time_params: TimeParameters,
 ) error{OutOfMemory}!BurstQueue {
@@ -278,8 +287,13 @@ fn generate_bursts(
                 try packets.append(pkt);
             }
 
+            const key = time.FlowKey{
+                .saddr = src_map.get(elem.key_ptr.saddr) orelse @panic("source address not in AddrMap!"),
+                .daddr = dst_map.get(elem.key_ptr.daddr) orelse @panic("destination address not in AddrMap!")
+            };
+
             const new_burst = Burst.init(
-                elem.key_ptr.*,
+                key,
                 burst.@"0",
                 burst.@"1",
                 packets
