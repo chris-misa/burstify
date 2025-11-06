@@ -171,6 +171,111 @@ pub const AddrAnalyzer = struct {
     }
 
     ///
+    /// Returns the structure function estimate of the weights of the given addresses.
+    /// In particular, the return is a slice of tuples where each tuples is
+    /// { q, tau-tilde(q), sd-hat(tau-tilde(q)) }
+    ///
+    /// TODO: find a way to implement all the sums in here using tree-fold for better numeric precision.
+    ///
+    pub fn structure_function(
+        self: *AddrAnalyzer,
+        allocator: std.mem.Allocator
+    ) error{OutOfMemory}![] struct { f64, f64, f64 } {
+        if (!self.is_prefixified) {
+            try self.prefixify();
+        }
+
+        var out = try allocator.alloc(struct { f64, f64, f64 }, 61);
+        @memset(out, .{ 0.0, 0.0, 0.0 });
+        var out_count: f64 = 0.0;
+
+        for (8..17) |pl| {
+            out_count += 1.0; // for running mean
+
+            // Compute total weight at this prefix length
+            const total: f64 = blk: {
+                var s: f64 = 0.0;
+                var it = self.data[pl].valueIterator();
+                while (it.next()) |val| {
+                    if (val.* > 1.0) {
+                        // TODO: for arbitrary floating point weights, we actually need to keep track of
+                        // count of addrs under each prefix and filter based on that being >1 here instead!
+                        s += val.*;
+                    }
+                }
+                break :blk s;
+            };
+        
+            for (0..61, 0..) |q_i, q_idx| {
+                const q = @as(f64, @floatFromInt(@as(i32, @intCast(q_i)) - 20)) / 10.0;
+
+                const thisZ = blk: {
+                    var z: f64 = 0.0;
+                    var it = self.data[pl].valueIterator();
+                    while (it.next()) |val| {
+                        if (val.* > 1.0) {
+                            // TODO: for arbitrary floating point weights, we actually need to keep track of
+                            // count of addrs under each prefix and filter based on that being >1 here instead!
+                            z += std.math.pow(f64, val.* / total, q);
+                        }
+                    }
+                    break :blk z;
+                };
+                const nextZ = blk: {
+                    var z: f64 = 0.0;
+                    var it = self.data[pl + 1].iterator();
+                    while (it.next()) |elem| {
+                        const mask: u32 = @truncate(@as(u64, 0xFFFFFFFF) << @truncate(32 - pl));
+                        const parent_key = elem.key_ptr.* & mask;
+                        const parent_value = self.data[pl].get(parent_key) orelse 0.0;
+                        if (parent_value > 1.0) {
+                            z += std.math.pow(f64, elem.value_ptr.* / total, q);
+                        }
+                    }
+                    break :blk z;
+                };
+                const tau = @log2(thisZ) - @log2(nextZ);
+
+                const d2 = blk: {
+                    var d2: f64 = 0.0;
+                    var it = self.data[pl].iterator();
+                    while (it.next()) |elem| {
+                        const left_child_key = elem.key_ptr.*;
+                        const left_child =
+                            if (self.data[pl + 1].get(left_child_key)) |c| std.math.pow(f64, c / total, q) else 0.0;
+                        const right_child_key = elem.key_ptr.* | @as(u32, @truncate(@as(u64, 1) << @truncate(32 - (pl + 1))));
+                        const right_child =
+                            if (self.data[pl + 1].get(right_child_key)) |c| std.math.pow(f64, c / total, q) else 0.0;
+                        d2 += std.math.pow(
+                            f64,
+                            (std.math.pow(f64, elem.value_ptr.* / total, q) / thisZ)
+                                - ((left_child + right_child) / nextZ),
+                            2
+                        );
+                    }
+                    break :blk d2;
+                };
+
+                out[q_idx].@"0" = q;
+                
+                // Running mean of tau values over pls
+                out[q_idx].@"1" += (tau - out[q_idx].@"1") / out_count;
+
+                // Sum d2's over pls
+                out[q_idx].@"2" += d2;
+            }
+        }
+
+        // Finish sd-hat estimate
+        for (out) |*elem| {
+            elem.*.@"2" = @sqrt(elem.*.@"2") / out_count;
+        }
+        // .. something's messed up with this sd estimation, esp for small q. Might just be numeric precision issues.
+        
+        return out;
+    }
+
+    ///
     /// Form the prefix map for the addresses already added.
     /// Returns the total number of addresses.
     ///
