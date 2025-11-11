@@ -22,7 +22,7 @@ pub fn build(b: *std.Build) void {
         // In this case the main source file is merely a path, however, in more
         // complicated build scripts, this could be a generated file.
         // .root_source_file = b.path("src/main.zig"),
-        .root_source_file = b.path("src/generate.zig"),
+        .root_source_file = b.path("src/sonata_gt.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -30,7 +30,7 @@ pub fn build(b: *std.Build) void {
     // This creates another `std.Build.Step.Compile`, but this one builds an executable
     // rather than a static library.
     const exe = b.addExecutable(.{
-        .name = "generate",
+        .name = "sonata_gt",
         .root_module = exe_mod,
     });
 
