@@ -8,25 +8,7 @@ const std = @import("std");
 
 const addr = @import("addrs.zig");
 const time = @import("time.zig");
-
-///
-/// Parameters controlling the time-domain process
-///
-pub const TimeParameters = struct {
-    a_on: f64, // shape parameter of the on-period Pareto distribution
-    m_on: f64, // position parameter of the on-period Pareto distribution
-    a_off: f64, // shape parameter of the off-period Pareto distribution
-    m_off: f64, // position parameter of the off-period Pareto distribution
-    total_duration: f64, // total duration of the output trace
-};
-
-///
-/// Parameters controlling the address space-domain process
-///
-pub const AddrParameters = struct {
-    src_sigma: f64, // parameter of the logit-normal generator in the source address cascade
-    dst_sigma: f64, // parameter of the logit-normal generator in the destination address cascade
-};
+const conf = @import("config.zig");
 
 const Burst = struct {
     key: time.FlowKey,
@@ -35,19 +17,8 @@ const Burst = struct {
     packets: std.ArrayList(time.Packet),
     cur_pkt_idx: usize,
 
-    pub fn init(
-        key: time.FlowKey,
-        start_time: f64,
-        end_time: f64,
-        packets: std.ArrayList(time.Packet)
-    ) Burst {
-        return Burst{
-            .key = key,
-            .start_time = start_time,
-            .end_time = end_time,
-            .packets = packets,
-            .cur_pkt_idx = 0
-        };
+    pub fn init(key: time.FlowKey, start_time: f64, end_time: f64, packets: std.ArrayList(time.Packet)) Burst {
+        return Burst{ .key = key, .start_time = start_time, .end_time = end_time, .packets = packets, .cur_pkt_idx = 0 };
     }
     pub fn deinit(self: *Burst) void {
         self.packets.deinit();
@@ -63,11 +34,11 @@ const BurstQueue = std.PriorityQueue(Burst, void, Burst.compare);
 
 ///
 /// Generator definition
-/// 
+///
 pub const Generator = struct {
     params: struct {
-        time: TimeParameters,
-        addr: AddrParameters,
+        time: conf.TimeParameters,
+        addr: conf.AddrParameters,
     },
 
     src_map: addr.AddrMap,
@@ -84,58 +55,27 @@ pub const Generator = struct {
     /// Create a new Generator.
     /// Note that the Generator only holds a pointer to the TimeAnalyzer and does not manage it's memory.
     ///
-    pub fn init(
-        allocator: std.mem.Allocator,
-        rand: std.Random,
-        flows: *time.TimeAnalyzer,
-        time_params: TimeParameters,
-        addr_params: AddrParameters
-    ) (error{OutOfMemory} || addr.AddrAnalyzerError)!Generator {
+    pub fn init(allocator: std.mem.Allocator, rand: std.Random, flows: *time.TimeAnalyzer, time_params: conf.TimeParameters, addr_params: conf.AddrParameters) (error{OutOfMemory} || addr.AddrAnalyzerError)!Generator {
+        const src_map = try get_addr_map(allocator, rand, &flows.flows, struct {
+            fn f(k: time.FlowKey) u32 {
+                return k.saddr;
+            }
+        }.f, addr_params.src_sigma);
 
-        const src_map = try get_addr_map(
-            allocator,
-            rand,
-            &flows.flows,
-            struct { fn f(k: time.FlowKey) u32 { return k.saddr; } }.f,
-            addr_params.src_sigma
-        );
-        
-        const dst_map = try get_addr_map(
-            allocator,
-            rand,
-            &flows.flows,
-            struct { fn f(k: time.FlowKey) u32 { return k.daddr; } }.f,
-            addr_params.dst_sigma
-        );
+        const dst_map = try get_addr_map(allocator, rand, &flows.flows, struct {
+            fn f(k: time.FlowKey) u32 {
+                return k.daddr;
+            }
+        }.f, addr_params.dst_sigma);
 
-        var bursts = try generate_bursts(
-            allocator,
-            rand,
-            src_map,
-            dst_map,
-            &flows.flows,
-            time_params
-        );
+        var bursts = try generate_bursts(allocator, rand, src_map, dst_map, &flows.flows, time_params);
 
         var active_bursts = BurstQueue.init(allocator, {});
 
         const first_burst = bursts.remove();
         try active_bursts.add(first_burst);
 
-        return Generator{
-            .params = .{
-                .time = time_params,
-                .addr = addr_params
-            },
-            .src_map = src_map,
-            .dst_map = dst_map,
-            .input_flows = flows,
-            .bursts = bursts,
-            .active_bursts = active_bursts,
-
-            .allocator = allocator,
-            .rand = rand
-        };
+        return Generator{ .params = .{ .time = time_params, .addr = addr_params }, .src_map = src_map, .dst_map = dst_map, .input_flows = flows, .bursts = bursts, .active_bursts = active_bursts, .allocator = allocator, .rand = rand };
     }
 
     pub fn deinit(self: *Generator) void {
@@ -146,7 +86,6 @@ pub const Generator = struct {
     }
 
     pub fn nextPacket(self: *Generator) error{OutOfMemory}!?struct { time.FlowKey, time.Packet } {
-
         var next_active = blk: {
             if (self.active_bursts.peek()) |active| {
                 if (self.bursts.peek()) |next| {
@@ -167,7 +106,7 @@ pub const Generator = struct {
                 return null;
             }
         };
-        
+
         // Extract the packet
         const pkt = next_active.packets.items[next_active.cur_pkt_idx];
 
@@ -188,13 +127,7 @@ pub const Generator = struct {
 ///
 /// Create AddrMap for field determined by project of all flows in flows
 ///
-fn get_addr_map(
-    allocator: std.mem.Allocator,
-    rand: std.Random,
-    flows: *time.FlowMap,
-    comptime project: fn (time.FlowKey) u32,
-    sigma: f64
-) (error{OutOfMemory} || addr.AddrAnalyzerError)!addr.AddrMap {
+fn get_addr_map(allocator: std.mem.Allocator, rand: std.Random, flows: *time.FlowMap, comptime project: fn (time.FlowKey) u32, sigma: f64) (error{OutOfMemory} || addr.AddrAnalyzerError)!addr.AddrMap {
 
     // Collect distinct addresses from flows
     var addrs = try addr.AddrAnalyzer.init(allocator);
@@ -237,9 +170,8 @@ fn generate_bursts(
     src_map: addr.AddrMap,
     dst_map: addr.AddrMap,
     flows: *time.FlowMap,
-    time_params: TimeParameters,
+    time_params: conf.TimeParameters,
 ) error{OutOfMemory}!BurstQueue {
-
     var bursts = BurstQueue.init(allocator, {});
 
     var it = flows.iterator();
@@ -253,16 +185,7 @@ fn generate_bursts(
         }
 
         // Generate synth bursts
-        const synth_bursts = try time.generate(
-            time_params.a_on,
-            time_params.m_on,
-            time_params.a_off,
-            time_params.m_off,
-            @intCast(pkts),
-            time_params.total_duration,
-            rand,
-            allocator
-        );
+        const synth_bursts = try time.generate(time_params.a_on, time_params.m_on, time_params.a_off, time_params.m_off, @intCast(pkts), time_params.total_duration, rand, allocator);
         defer allocator.free(synth_bursts);
 
         // Copy packets from this flow into synth bursts
@@ -287,20 +210,12 @@ fn generate_bursts(
                 try packets.append(pkt);
             }
 
-            const key = time.FlowKey{
-                .saddr = src_map.get(elem.key_ptr.saddr) orelse @panic("source address not in AddrMap!"),
-                .daddr = dst_map.get(elem.key_ptr.daddr) orelse @panic("destination address not in AddrMap!")
-            };
+            const key = time.FlowKey{ .saddr = src_map.get(elem.key_ptr.saddr) orelse @panic("source address not in AddrMap!"), .daddr = dst_map.get(elem.key_ptr.daddr) orelse @panic("destination address not in AddrMap!") };
 
-            const new_burst = Burst.init(
-                key,
-                burst.@"0",
-                burst.@"1",
-                packets
-            );
+            const new_burst = Burst.init(key, burst.@"0", burst.@"1", packets);
             try bursts.add(new_burst);
         }
     }
-    
+
     return bursts;
 }
