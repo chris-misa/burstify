@@ -49,28 +49,53 @@ pub fn main() !void {
         var generator = try gen.Generator.init(allocator, rand, &flows, target.time, target.addr);
         defer generator.deinit();
 
-        var query = DDoS.init(allocator, 45);
+        const query_gen = struct {
+            fn f(alloc: std.mem.Allocator) DDoS {
+                return DDoS.init(alloc, 45);
+            }
+        }.f;
+        
+        var query = query_gen(allocator);
         defer query.deinit();
 
-        while (try generator.nextPacket()) |elem| {
-            const key: time.FlowKey = elem.@"0";
-            const pkt: time.Packet = elem.@"1";
-
-            // TODO:::: add windowing here!!!
-            try query.process(key, pkt);
-        }
-        const res = try query.result(allocator);
-        defer res.deinit();
+        var next_epoch: ?f64 = null;
+        const epoch_duration: f64 = 1.0; // TODO: need some Sonata- or solution-specific config that holds this info...
 
         const outfile_name = try util.strcat(allocator, target.output_pcap, ".csv");
         defer allocator.free(outfile_name);
         const outfile = try std.fs.cwd().createFile(outfile_name, .{});
         defer outfile.close();
         const out = outfile.writer();
-
         try out.print("time,dst\n", .{});
+
+        while (try generator.nextPacket()) |elem| {
+            const key: time.FlowKey = elem.@"0";
+            const pkt: time.Packet = elem.@"1";
+
+            if (next_epoch) |nxt| {
+                if (pkt.time > nxt) {
+                    // Epoch expired: dump and reset
+                    const res = try query.result(allocator);
+                    defer res.deinit();
+                    for (res.items) |dst| {
+                        try out.print("{d},{}\n", .{ nxt - epoch_duration, addr.Addr{ .base = dst } });
+                    }
+                    query.deinit();
+                    query = query_gen(allocator);
+                    next_epoch = nxt + epoch_duration;
+                }
+            } else {
+                // Set first epoch
+                next_epoch = pkt.time + epoch_duration;
+            }
+            try query.process(key, pkt);
+        }
+        
+        // Dump partial results of last epoch
+        const res = try query.result(allocator);
+        defer res.deinit();
         for (res.items) |dst| {
-            try out.print("0,{}\n", .{addr.Addr{ .base = dst }});
+            try out.print("{d},{}\n", .{ next_epoch.? - epoch_duration, addr.Addr{ .base = dst } });
         }
     }
 }
