@@ -38,14 +38,18 @@ pub const AddrAnalyzerError = error{AddingToAlreadyBuiltMap};
 /// Note that the analysis functions automatically form the prefix tree (by calling AddrAnalyzer.prefixify()) so you can't add more addresses after calling them.
 ///
 pub const AddrAnalyzer = struct {
-    data: []std.AutoHashMap(u32, f64),
+
+    /// data is an array of maps where the array index is the prefix length,
+    /// the map key is the base address of each prefix, and
+    /// the map value is a tuple of { number-of-addresses, weight }.
+    data: []std.AutoHashMap(u32, struct { u32, f64 }),
     allocator: std.mem.Allocator,
     is_prefixified: bool,
 
     pub fn init(allocator: std.mem.Allocator) error{OutOfMemory}!AddrAnalyzer {
-        const data = try allocator.alloc(std.AutoHashMap(u32, f64), 33);
+        const data = try allocator.alloc(std.AutoHashMap(u32, struct { u32, f64 }), 33);
         for (data) |*elem| {
-            elem.* = std.AutoHashMap(u32, f64).init(allocator);
+            elem.* = std.AutoHashMap(u32, struct { u32, f64 }).init(allocator);
         }
         return AddrAnalyzer{ .data = data, .allocator = allocator, .is_prefixified = false };
     }
@@ -80,7 +84,7 @@ pub const AddrAnalyzer = struct {
         if (self.is_prefixified) {
             return error.AddingToAlreadyBuiltMap;
         } else if (!self.data[32].contains(addr)) {
-            try self.data[32].put(addr, weight);
+            try self.data[32].put(addr, .{ 1, weight });
         }
     }
 
@@ -93,9 +97,9 @@ pub const AddrAnalyzer = struct {
             return error.AddingToAlreadyBuiltMap;
         }
         if (self.data[32].getPtr(addr)) |v| {
-            v.* += 1.0;
+            v.*.@"1" += 1.0;
         } else {
-            try self.data[32].put(addr, 1.0);
+            try self.data[32].put(addr, .{ 1, 1.0 });
         }
     }
 
@@ -118,13 +122,15 @@ pub const AddrAnalyzer = struct {
             var it = m[pl].iterator();
             while (it.next()) |elem| {
                 // Skip the singletons
-                if (elem.value_ptr.* > 1.0) {
+                if (elem.value_ptr.*.@"0" > 1) {
                     var w = self.get_w(.{ .base = elem.key_ptr.*, .len = @intCast(pl) });
+
+                    // TODO: technically should only round like this if w is integral
                     if (w == 0.0) {
-                        w = 1.0 / (2.0 * elem.value_ptr.*);
+                        w = 1.0 / (2.0 * elem.value_ptr.*.@"1");
                     }
                     if (w == 1.0) {
-                        w = 1.0 - (1.0 / (2.0 * elem.value_ptr.*));
+                        w = 1.0 - (1.0 / (2.0 * elem.value_ptr.*.@"1"));
                     }
 
                     const x = @log(w / (1.0 - w));
@@ -156,9 +162,11 @@ pub const AddrAnalyzer = struct {
         for (0..33) |pl| {
             const mask: u32 = @truncate(@as(u64, 0xFFFFFFFF) << @truncate(32 - pl));
             if (self.data[pl].get(addr & mask)) |count| {
-                if (count > 1.0) {
+
+                // TODO: technically could include the first time count.@"0" == 1 as the end of the line
+                if (count.@"0" > 1) {
                     const x = @as(f64, @floatFromInt(pl));
-                    const y = -@log2(count / nf);
+                    const y = -@log2(count.@"1" / nf);
                     slope.addPoint(x, y);
                 } else {
                     break;
@@ -197,10 +205,8 @@ pub const AddrAnalyzer = struct {
                 var s: f64 = 0.0;
                 var it = self.data[pl].valueIterator();
                 while (it.next()) |val| {
-                    if (val.* > 1.0) {
-                        // TODO: for arbitrary floating point weights, we actually need to keep track of
-                        // count of addrs under each prefix and filter based on that being >1 here instead!
-                        s += val.*;
+                    if (val.*.@"0" > 1) {
+                        s += val.*.@"1";
                     }
                 }
                 break :blk s;
@@ -213,10 +219,8 @@ pub const AddrAnalyzer = struct {
                     var z: f64 = 0.0;
                     var it = self.data[pl].valueIterator();
                     while (it.next()) |val| {
-                        if (val.* > 1.0) {
-                            // TODO: for arbitrary floating point weights, we actually need to keep track of
-                            // count of addrs under each prefix and filter based on that being >1 here instead!
-                            z += std.math.pow(f64, val.* / total, q);
+                        if (val.*.@"0" > 1) {
+                            z += std.math.pow(f64, val.*.@"1" / total, q);
                         }
                     }
                     break :blk z;
@@ -227,9 +231,9 @@ pub const AddrAnalyzer = struct {
                     while (it.next()) |elem| {
                         const mask: u32 = @truncate(@as(u64, 0xFFFFFFFF) << @truncate(32 - pl));
                         const parent_key = elem.key_ptr.* & mask;
-                        const parent_value = self.data[pl].get(parent_key) orelse 0.0;
-                        if (parent_value > 1.0) {
-                            z += std.math.pow(f64, elem.value_ptr.* / total, q);
+                        const parent_value = if (self.data[pl].get(parent_key)) |v| v.@"0" else 0;
+                        if (parent_value > 1) {
+                            z += std.math.pow(f64, elem.value_ptr.*.@"1" / total, q);
                         }
                     }
                     break :blk z;
@@ -240,18 +244,20 @@ pub const AddrAnalyzer = struct {
                     var d2: f64 = 0.0;
                     var it = self.data[pl].iterator();
                     while (it.next()) |elem| {
-                        const left_child_key = elem.key_ptr.*;
-                        const left_child =
-                            if (self.data[pl + 1].get(left_child_key)) |c| std.math.pow(f64, c / total, q) else 0.0;
-                        const right_child_key = elem.key_ptr.* | @as(u32, @truncate(@as(u64, 1) << @truncate(32 - (pl + 1))));
-                        const right_child =
-                            if (self.data[pl + 1].get(right_child_key)) |c| std.math.pow(f64, c / total, q) else 0.0;
-                        d2 += std.math.pow(
-                            f64,
-                            (std.math.pow(f64, elem.value_ptr.* / total, q) / thisZ)
-                                - ((left_child + right_child) / nextZ),
-                            2
-                        );
+                        if (elem.value_ptr.*.@"0" > 1) {
+                            const left_child_key = elem.key_ptr.*;
+                            const left_child =
+                                if (self.data[pl + 1].get(left_child_key)) |c| std.math.pow(f64, c.@"1" / total, q) else 0.0;
+                            const right_child_key = elem.key_ptr.* | @as(u32, @truncate(@as(u64, 1) << @truncate(32 - (pl + 1))));
+                            const right_child =
+                                if (self.data[pl + 1].get(right_child_key)) |c| std.math.pow(f64, c.@"1" / total, q) else 0.0;
+                            d2 += std.math.pow(
+                                f64,
+                                (std.math.pow(f64, elem.value_ptr.*.@"1" / total, q) / thisZ)
+                                    - ((left_child + right_child) / nextZ),
+                                2
+                            );
+                        }
                     }
                     break :blk d2;
                 };
@@ -289,7 +295,8 @@ pub const AddrAnalyzer = struct {
             while (it.next()) |elem| {
                 const addr = elem.key_ptr.* & mask;
                 if (m[pl - 1].getPtr(addr)) |next_elem| {
-                    next_elem.* += elem.value_ptr.*;
+                    next_elem.*.@"0" += elem.value_ptr.*.@"0";
+                    next_elem.*.@"1" += elem.value_ptr.*.@"1";
                 } else {
                     try m[pl - 1].put(addr, elem.value_ptr.*);
                 }
@@ -309,8 +316,8 @@ pub const AddrAnalyzer = struct {
         const l_base: u32 = pfx.base;
         const r_base: u32 = pfx.base | (@as(u32, 1) << @truncate(32 - pl));
 
-        const l: f64 = if (m[pl].get(l_base)) |v| v else 0.0;
-        const r: f64 = if (m[pl].get(r_base)) |v| v else 0.0;
+        const l: f64 = if (m[pl].get(l_base)) |v| v.@"1" else 0.0;
+        const r: f64 = if (m[pl].get(r_base)) |v| v.@"1" else 0.0;
 
         return l / (l + r);
     }
