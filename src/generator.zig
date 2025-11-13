@@ -20,7 +20,7 @@ const Burst = struct {
     pub fn init(key: time.FlowKey, start_time: f64, end_time: f64, packets: std.ArrayList(time.Packet)) Burst {
         return Burst{ .key = key, .start_time = start_time, .end_time = end_time, .packets = packets, .cur_pkt_idx = 0 };
     }
-    pub fn deinit(self: *Burst) void {
+    pub fn deinit(self: Burst) void {
         self.packets.deinit();
     }
 
@@ -81,7 +81,19 @@ pub const Generator = struct {
     pub fn deinit(self: *Generator) void {
         self.src_map.deinit();
         self.dst_map.deinit();
+        {
+            var it = self.bursts.iterator();
+            while (it.next()) |elem| {
+                elem.deinit();
+            }
+        }
         self.bursts.deinit();
+        {
+            var it = self.active_bursts.iterator();
+            while (it.next()) |elem| {
+                elem.deinit();
+            }
+        }
         self.active_bursts.deinit();
     }
 

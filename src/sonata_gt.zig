@@ -43,74 +43,126 @@ pub fn main() !void {
 
     std.debug.print("Read {d} flows\n", .{flows.flows.count()});
 
+    // Loop over different trace-generation targets
     for (config.value.targets) |target| {
         std.debug.print("Executing target {s}\n", .{target.output_pcap});
 
         var generator = try gen.Generator.init(allocator, rand, &flows, target.time, target.addr);
         defer generator.deinit();
 
-        const query_gen = struct {
-            fn f(alloc: std.mem.Allocator) DDoS {
-                return DDoS.init(alloc, 45);
-            }
-        }.f;
-        
-        var query = query_gen(allocator);
+        const threshold = 45;
+        const epoch_duration: f64 = 1.0;
+
+        var common = try QueryCommon.init(allocator, target.output_pcap, epoch_duration);
+        defer common.deinit();
+        var query = try DDoS.init(allocator, &common, threshold);
         defer query.deinit();
-
-        var next_epoch: ?f64 = null;
-        const epoch_duration: f64 = 1.0; // TODO: need some Sonata- or solution-specific config that holds this info...
-
-        const outfile_name = try util.strcat(allocator, target.output_pcap, ".csv");
-        defer allocator.free(outfile_name);
-        const outfile = try std.fs.cwd().createFile(outfile_name, .{});
-        defer outfile.close();
-        const out = outfile.writer();
-        try out.print("time,dst\n", .{});
 
         while (try generator.nextPacket()) |elem| {
             const key: time.FlowKey = elem.@"0";
             const pkt: time.Packet = elem.@"1";
 
-            if (next_epoch) |nxt| {
-                if (pkt.time > nxt) {
-                    // Epoch expired: dump and reset
-                    const res = try query.result(allocator);
-                    defer res.deinit();
-                    for (res.items) |dst| {
-                        try out.print("{d},{}\n", .{ nxt - epoch_duration, addr.Addr{ .base = dst } });
-                    }
-                    query.deinit();
-                    query = query_gen(allocator);
-                    next_epoch = nxt + epoch_duration;
-                }
-            } else {
-                // Set first epoch
-                next_epoch = pkt.time + epoch_duration;
-            }
             try query.process(key, pkt);
         }
         
         // Dump partial results of last epoch
-        const res = try query.result(allocator);
-        defer res.deinit();
-        for (res.items) |dst| {
-            try out.print("{d},{}\n", .{ next_epoch.? - epoch_duration, addr.Addr{ .base = dst } });
-        }
+        try query.output();
     }
 }
 
+///
+/// Common state and operations required across all queries
+///
+const QueryCommon = struct {
+    epoch_duration: f64,
+    next_epoch: ?f64,
+
+    results_outfile: std.fs.File,
+    metadata_outfile: std.fs.File,
+    
+    results_out: std.fs.File.Writer,
+    metadata_out: std.fs.File.Writer,
+
+    pub fn init(
+        allocator: std.mem.Allocator,
+        base_name: []u8,
+        epoch_duration: f64
+    ) (std.fs.File.OpenError || error {OutOfMemory})!QueryCommon {
+        const results_filename = try util.strcat(allocator, base_name, ".out.csv");
+        defer allocator.free(results_filename);
+        const results_outfile = try std.fs.cwd().createFile(results_filename, .{});
+
+        const metadata_filename = try util.strcat(allocator, base_name, ".metadata.csv");
+        defer allocator.free(metadata_filename);
+        const metadata_outfile = try std.fs.cwd().createFile(metadata_filename, .{});
+
+        return QueryCommon{
+            .epoch_duration = epoch_duration,
+            .next_epoch = null,
+            .results_outfile = results_outfile,
+            .metadata_outfile = metadata_outfile,
+            .results_out = results_outfile.writer(),
+            .metadata_out = metadata_outfile.writer(),
+        };
+    }
+
+    pub fn deinit(self: *QueryCommon) void {
+        self.results_outfile.close();
+        self.metadata_outfile.close();
+    }
+
+    ///
+    /// Checks if the epoch should be updated at cur_time.
+    ///
+    pub fn check_epoch(self: *QueryCommon, cur_time: f64) bool {
+        if (self.next_epoch) |nxt| {
+            if (cur_time > nxt) {
+                return true;
+            } else {
+                return false;
+            }
+        } else {
+            // Set first epoch
+            self.next_epoch = cur_time + self.epoch_duration;
+            return false;
+        }
+    }
+
+    ///
+    /// Advances the epoch by self.epoch_duration
+    ///
+    pub fn advance_epoch(self: *QueryCommon) void {
+        self.next_epoch = self.next_epoch.? + self.epoch_duration;
+    }
+};
+
+///
+/// DDoS from Sonata, ground-truth computation
+///
 const DDoS = struct {
     const Self = @This();
+
+    common: *QueryCommon,
+    allocator: std.mem.Allocator,
 
     distinct: std.AutoHashMap(struct { u32, u32 }, void),
     reduce: std.AutoHashMap(u32, u32),
     threshold: u32,
 
-    pub fn init(allocator: std.mem.Allocator, threshold: u32) Self {
+    pub fn init(allocator: std.mem.Allocator, common: *QueryCommon, threshold: u32) std.io.AnyWriter.Error!Self {
+        // Create query-specific state
         const d = std.AutoHashMap(struct { u32, u32 }, void).init(allocator);
         const r = std.AutoHashMap(u32, u32).init(allocator);
-        return DDoS{ .distinct = d, .reduce = r, .threshold = threshold };
+        // Write output file headers
+        try common.results_out.print("time,dst\n", .{});
+        try common.metadata_out.print("time,distinct_card,reduce_card\n", .{});
+        return DDoS{
+            .common = common,
+            .allocator = allocator,
+            .distinct = d,
+            .reduce = r,
+            .threshold = threshold
+        };
     }
 
     pub fn deinit(self: *Self) void {
@@ -118,8 +170,15 @@ const DDoS = struct {
         self.reduce.deinit();
     }
 
-    pub fn process(self: *Self, key: time.FlowKey, pkt: time.Packet) error{OutOfMemory}!void {
-        _ = pkt;
+    pub fn process(self: *Self, key: time.FlowKey, pkt: time.Packet) (std.io.AnyWriter.Error || error{OutOfMemory})!void {
+
+        if (self.common.check_epoch(pkt.time)) {
+            try self.output();
+            self.distinct.clearRetainingCapacity();
+            self.reduce.clearRetainingCapacity();
+            self.common.advance_epoch();
+        }
+        
         if (!self.distinct.contains(.{ key.saddr, key.daddr })) {
             try self.distinct.put(.{ key.saddr, key.daddr }, {});
             if (self.reduce.getPtr(key.daddr)) |val| {
@@ -128,6 +187,26 @@ const DDoS = struct {
                 try self.reduce.put(key.daddr, 1);
             }
         }
+    }
+
+    pub fn output(self: *Self) (std.io.AnyWriter.Error || error{OutOfMemory})!void {
+        if (self.common.next_epoch) |nxt| {
+            const out_time: f64 = nxt - self.common.epoch_duration;
+
+            // Output query results for ground-truth
+            const res = try self.result(self.allocator);
+            defer res.deinit();
+            for (res.items) |dst| {
+                try self.common.results_out.print("{d},{}\n", .{ out_time, addr.Addr{ .base = dst } });
+            }
+
+            // Output metadata counts
+            try self.common.metadata_out.print("{d},{d},{d}\n", .{ out_time, self.distinct.count(), self.reduce.count() });
+
+        } else {
+            @panic("Trying to output query results before next_epoch is set!");
+        }
+
     }
 
     pub fn result(self: Self, allocator: std.mem.Allocator) error{OutOfMemory}!std.ArrayList(u32) {
