@@ -48,6 +48,7 @@ pub fn main() !void {
 
     for (config.value.targets) |target| {
         std.debug.print("Starting target {s}\n", .{target.output_pcap});
+
         const thread = try std.Thread.spawn(.{}, run_target, .{ allocator, rand, &flows, target });
         try threads.append(thread);
     }
