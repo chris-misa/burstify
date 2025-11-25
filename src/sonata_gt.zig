@@ -50,6 +50,8 @@ pub fn main() !void {
         var generator = try gen.Generator.init(allocator, rand, &flows, target.time, target.addr);
         defer generator.deinit();
 
+        std.debug.print("  Generated trace\n", .{});
+
         const threshold = 45;
         const epoch_duration: f64 = 1.0;
 
@@ -58,15 +60,18 @@ pub fn main() !void {
         var query = try DDoS.init(allocator, &common, threshold);
         defer query.deinit();
 
+        std.debug.print("  Running query\n", .{});
+
         while (try generator.nextPacket()) |elem| {
             const key: time.FlowKey = elem.@"0";
             const pkt: time.Packet = elem.@"1";
 
             try query.process(key, pkt);
         }
-        
+
         // Dump partial results of last epoch
         try query.output();
+        std.debug.print("  Done\n", .{});
     }
 }
 
@@ -79,15 +84,11 @@ const QueryCommon = struct {
 
     results_outfile: std.fs.File,
     metadata_outfile: std.fs.File,
-    
+
     results_out: std.fs.File.Writer,
     metadata_out: std.fs.File.Writer,
 
-    pub fn init(
-        allocator: std.mem.Allocator,
-        base_name: []u8,
-        epoch_duration: f64
-    ) (std.fs.File.OpenError || error {OutOfMemory})!QueryCommon {
+    pub fn init(allocator: std.mem.Allocator, base_name: []u8, epoch_duration: f64) (std.fs.File.OpenError || error{OutOfMemory})!QueryCommon {
         const results_filename = try util.strcat(allocator, base_name, ".out.csv");
         defer allocator.free(results_filename);
         const results_outfile = try std.fs.cwd().createFile(results_filename, .{});
@@ -156,13 +157,7 @@ const DDoS = struct {
         // Write output file headers
         try common.results_out.print("time,dst\n", .{});
         try common.metadata_out.print("time,distinct_card,reduce_card\n", .{});
-        return DDoS{
-            .common = common,
-            .allocator = allocator,
-            .distinct = d,
-            .reduce = r,
-            .threshold = threshold
-        };
+        return DDoS{ .common = common, .allocator = allocator, .distinct = d, .reduce = r, .threshold = threshold };
     }
 
     pub fn deinit(self: *Self) void {
@@ -171,14 +166,13 @@ const DDoS = struct {
     }
 
     pub fn process(self: *Self, key: time.FlowKey, pkt: time.Packet) (std.io.AnyWriter.Error || error{OutOfMemory})!void {
-
         if (self.common.check_epoch(pkt.time)) {
             try self.output();
             self.distinct.clearRetainingCapacity();
             self.reduce.clearRetainingCapacity();
             self.common.advance_epoch();
         }
-        
+
         if (!self.distinct.contains(.{ key.saddr, key.daddr })) {
             try self.distinct.put(.{ key.saddr, key.daddr }, {});
             if (self.reduce.getPtr(key.daddr)) |val| {
@@ -202,11 +196,9 @@ const DDoS = struct {
 
             // Output metadata counts
             try self.common.metadata_out.print("{d},{d},{d}\n", .{ out_time, self.distinct.count(), self.reduce.count() });
-
         } else {
             @panic("Trying to output query results before next_epoch is set!");
         }
-
     }
 
     pub fn result(self: Self, allocator: std.mem.Allocator) error{OutOfMemory}!std.ArrayList(u32) {
