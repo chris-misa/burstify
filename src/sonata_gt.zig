@@ -44,35 +44,40 @@ pub fn main() !void {
     std.debug.print("Read {d} flows\n", .{flows.flows.count()});
 
     // Loop over different trace-generation targets
+    var threads = try std.ArrayList(std.Thread).initCapacity(allocator, config.value.targets.len);
+
     for (config.value.targets) |target| {
-        std.debug.print("Executing target {s}\n", .{target.output_pcap});
-
-        var generator = try gen.Generator.init(allocator, rand, &flows, target.time, target.addr);
-        defer generator.deinit();
-
-        std.debug.print("  Generated trace\n", .{});
-
-        const threshold = 45;
-        const epoch_duration: f64 = 1.0;
-
-        var common = try QueryCommon.init(allocator, target.output_pcap, epoch_duration);
-        defer common.deinit();
-        var query = try DDoS.init(allocator, &common, threshold);
-        defer query.deinit();
-
-        std.debug.print("  Running query\n", .{});
-
-        while (try generator.nextPacket()) |elem| {
-            const key: time.FlowKey = elem.@"0";
-            const pkt: time.Packet = elem.@"1";
-
-            try query.process(key, pkt);
-        }
-
-        // Dump partial results of last epoch
-        try query.output();
-        std.debug.print("  Done\n", .{});
+        std.debug.print("Starting target {s}\n", .{target.output_pcap});
+        const thread = try std.Thread.spawn(.{}, run_target, .{ allocator, rand, &flows, target });
+        try threads.append(thread);
     }
+
+    for (threads.items) |thread| {
+        thread.join();
+    }
+}
+
+fn run_target(allocator: std.mem.Allocator, rand: std.Random, flows: *const time.TimeAnalyzer, target: conf.Target) !void {
+    var generator = try gen.Generator.init(allocator, rand, flows, target.time, target.addr);
+    defer generator.deinit();
+
+    const threshold = 45;
+    const epoch_duration: f64 = 1.0;
+
+    var common = try QueryCommon.init(allocator, target.output_pcap, epoch_duration);
+    defer common.deinit();
+    var query = try DDoS.init(allocator, &common, threshold);
+    defer query.deinit();
+
+    while (try generator.nextPacket()) |elem| {
+        const key: time.FlowKey = elem.@"0";
+        const pkt: time.Packet = elem.@"1";
+
+        try query.process(key, pkt);
+    }
+
+    // Dump partial results of last epoch
+    try query.output();
 }
 
 ///
