@@ -26,9 +26,6 @@ pub fn main() !void {
         if (deinit_status == .leak) @panic("TEST FAIL: leaked memory");
     }
 
-    var rand_gen = std.Random.DefaultPrng.init(12345);
-    const rand = rand_gen.random();
-
     // Read config
     const config_file = try std.fs.cwd().readFileAlloc(allocator, config_filepath, 4096);
     defer allocator.free(config_file);
@@ -46,8 +43,11 @@ pub fn main() !void {
     // Loop over different trace-generation targets
     var threads = try std.ArrayList(std.Thread).initCapacity(allocator, config.value.targets.len);
 
-    for (config.value.targets) |target| {
+    for (config.value.targets, 0..) |target, i| {
         std.debug.print("Starting target {s}\n", .{target.output_pcap});
+
+        var rand_gen = std.Random.DefaultPrng.init(12345 + i);
+        const rand = rand_gen.random();
 
         const thread = try std.Thread.spawn(.{}, run_target, .{ allocator, rand, &flows, target });
         try threads.append(thread);
