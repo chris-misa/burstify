@@ -25,7 +25,11 @@ pub const Burst = struct {
 
     pub fn init(allocator: std.mem.Allocator, time: f64) Burst {
         const packets = std.ArrayList(Packet).init(allocator);
-        return Burst{ .start_time = time, .end_time = time, .packets = packets };
+        return Burst{
+            .start_time = time,
+            .end_time = time,
+            .packets = packets,
+        };
     }
 
     pub fn deinit(self: *Burst) void {
@@ -50,7 +54,11 @@ pub const TimeAnalyzer = struct {
 
     pub fn init(allocator: std.mem.Allocator, burst_timeout_sec: f64) error{OutOfMemory}!TimeAnalyzer {
         const flows = FlowMap.init(allocator);
-        return TimeAnalyzer{ .flows = flows, .burst_timeout = burst_timeout_sec, .allocator = allocator };
+        return TimeAnalyzer{
+            .flows = flows,
+            .burst_timeout = burst_timeout_sec,
+            .allocator = allocator,
+        };
     }
 
     pub fn deinit(self: *TimeAnalyzer) void {
@@ -181,12 +189,18 @@ pub fn generate(
     total_packets: u32,
     total_duration: f64,
     rand: std.Random,
-    allocator: std.mem.Allocator
+    allocator: std.mem.Allocator,
 ) error{OutOfMemory}![]struct { f64, f64, u32 } {
-
     if (m_off >= total_duration) {
-        std.debug.print("Calling time.generate() with minimum off period longer than total duration ({d} >= {d})...would loop forever.\n", .{m_off, total_duration});
+        std.debug.print("Calling time.generate() with minimum off period longer than total duration ({d} >= {d})...would loop forever.\n", .{ m_off, total_duration });
         @panic("Bad arguments to time.generate()");
+    }
+
+    if (m_on <= 0.0 or m_off <= 0.0) {
+        @panic("Can't have minimum value of Pareto distribution <= 0 (m_on or m_off)");
+    }
+    if (a_on <= 0.0 or a_off <= 0.0) {
+        @panic("Can't have shape value of Pareto distribution <= 0 (a_on or a_off)");
     }
 
     var res = try std.ArrayList(struct { f64, f64, u32 }).initCapacity(allocator, 1);
@@ -207,7 +221,7 @@ pub fn generate(
         }
         total_on += on_dur;
         const off_dur = pareto(a_off, m_off, rand);
-        try res.append(.{cur, cur + on_dur, 0});
+        try res.append(.{ cur, cur + on_dur, 0 });
         cur += on_dur;
         cur += off_dur;
     }
@@ -222,10 +236,9 @@ pub fn generate(
 
         const on_pos_pkts = on_pos * pkts_per_sec;
         const off_pos_pkts = off_pos * pkts_per_sec;
-        
-        const pkts: u32 = @as(u32, @intFromFloat(@floor(off_pos_pkts)))
-            - @as(u32, @intFromFloat(@floor(on_pos_pkts)));
-        
+
+        const pkts: u32 = @as(u32, @intFromFloat(@floor(off_pos_pkts))) - @as(u32, @intFromFloat(@floor(on_pos_pkts)));
+
         burst.*.@"2" = pkts;
         on_pos = off_pos;
 
@@ -243,7 +256,7 @@ pub fn generate(
             i += 1;
         }
     }
-    
+
     return output;
 }
 

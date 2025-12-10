@@ -7,7 +7,7 @@
                 "a_on": 1.2,
                 "m_on": 0.01,
                 "a_off": 0.4,
-                "m_off": 0.0,
+                "m_off": 0.01,
                 "total_duration": 5.0
             },
             "addr": {
