@@ -17,14 +17,29 @@ const Burst = struct {
     packets: std.ArrayList(time.Packet),
     cur_pkt_idx: usize,
 
-    pub fn init(key: time.FlowKey, start_time: f64, end_time: f64, packets: std.ArrayList(time.Packet)) Burst {
-        return Burst{ .key = key, .start_time = start_time, .end_time = end_time, .packets = packets, .cur_pkt_idx = 0 };
+    pub fn init(
+        key: time.FlowKey,
+        start_time: f64,
+        end_time: f64,
+        packets: std.ArrayList(time.Packet),
+    ) Burst {
+        return Burst{
+            .key = key,
+            .start_time = start_time,
+            .end_time = end_time,
+            .packets = packets,
+            .cur_pkt_idx = 0,
+        };
     }
     pub fn deinit(self: Burst) void {
         self.packets.deinit();
     }
 
-    pub fn compare(context: void, l: Burst, r: Burst) std.math.Order {
+    pub fn compare(
+        context: void,
+        l: Burst,
+        r: Burst,
+    ) std.math.Order {
         _ = context;
         return std.math.order(l.start_time, r.start_time);
     }
@@ -55,7 +70,13 @@ pub const Generator = struct {
     /// Create a new Generator.
     /// Note that the Generator only holds a pointer to the TimeAnalyzer and does not manage it's memory.
     ///
-    pub fn init(allocator: std.mem.Allocator, rand: std.Random, flows: *const time.TimeAnalyzer, time_params: conf.TimeParameters, addr_params: conf.AddrParameters) (error{OutOfMemory} || addr.AddrAnalyzerError)!Generator {
+    pub fn init(
+        allocator: std.mem.Allocator,
+        rand: std.Random,
+        flows: *const time.TimeAnalyzer,
+        time_params: conf.TimeParameters,
+        addr_params: conf.AddrParameters,
+    ) (error{OutOfMemory} || addr.AddrAnalyzerError)!Generator {
         const src_map = try get_addr_map(allocator, rand, &flows.flows, struct {
             fn f(k: time.FlowKey) u32 {
                 return k.saddr;
@@ -73,7 +94,16 @@ pub const Generator = struct {
         const first_burst = bursts.remove();
         try active_bursts.add(first_burst);
 
-        return Generator{ .params = .{ .time = time_params, .addr = addr_params }, .src_map = src_map, .dst_map = dst_map, .input_flows = flows, .bursts = bursts, .active_bursts = active_bursts, .allocator = allocator, .rand = rand };
+        return Generator{
+            .params = .{ .time = time_params, .addr = addr_params },
+            .src_map = src_map,
+            .dst_map = dst_map,
+            .input_flows = flows,
+            .bursts = bursts,
+            .active_bursts = active_bursts,
+            .allocator = allocator,
+            .rand = rand,
+        };
     }
 
     pub fn deinit(self: *Generator) void {
@@ -137,7 +167,13 @@ pub const Generator = struct {
 ///
 /// Create AddrMap for field determined by project of all flows in flows
 ///
-fn get_addr_map(allocator: std.mem.Allocator, rand: std.Random, flows: *const time.FlowMap, comptime project: fn (time.FlowKey) u32, sigma: f64) (error{OutOfMemory} || addr.AddrAnalyzerError)!addr.AddrMap {
+fn get_addr_map(
+    allocator: std.mem.Allocator,
+    rand: std.Random,
+    flows: *const time.FlowMap,
+    comptime project: fn (time.FlowKey) u32,
+    sigma: f64,
+) (error{OutOfMemory} || addr.AddrAnalyzerError)!addr.AddrMap {
 
     // Collect distinct addresses from flows
     var addrs = try addr.AddrAnalyzer.init(allocator);
@@ -189,7 +225,6 @@ fn generate_bursts(
 
     var it = flows.iterator();
     while (it.next()) |elem| {
-
         const input_key: *time.FlowKey = elem.key_ptr;
         const input_bursts: []time.Burst = elem.value_ptr.items;
 
@@ -208,6 +243,10 @@ fn generate_bursts(
             // Avoid overheads of generating bursts for single-packet flows
             // Just take packet's arrival time as uniform random in range implied by duration
 
+            if (input_bursts.len != 1 or input_bursts[0].packets.items.len != 1) {
+                @panic("in single-packet flow case, but the flow has more than one burst or packets!");
+            }
+
             var pkt = input_bursts[0].packets.items[0];
             pkt.time = rand.float(f64) * time_params.total_duration;
 
@@ -216,12 +255,11 @@ fn generate_bursts(
 
             const key = time.FlowKey{
                 .saddr = src_map.get(input_key.saddr) orelse @panic("source address not in AddrMap!"),
-                .daddr = dst_map.get(input_key.daddr) orelse @panic("destination address not in AddrMap!")
+                .daddr = dst_map.get(input_key.daddr) orelse @panic("destination address not in AddrMap!"),
             };
 
             const new_burst = Burst.init(key, pkt.time, pkt.time, packets);
             try bursts.add(new_burst);
-
         } else {
 
             // Generate synth bursts
@@ -233,7 +271,7 @@ fn generate_bursts(
                 @intCast(pkts),
                 time_params.total_duration,
                 rand,
-                allocator
+                allocator,
             );
             defer allocator.free(synth_bursts);
 
@@ -242,9 +280,12 @@ fn generate_bursts(
             var input_pkt_idx: u32 = 0;
             for (synth_bursts) |burst| {
                 var packets = try std.ArrayList(time.Packet).initCapacity(allocator, 1);
+                const start_time: f64 = burst.@"0";
+                const end_time: f64 = burst.@"1";
+                const num_pkts: u32 = burst.@"2";
+                const num_pkts_f = @as(f64, @floatFromInt(num_pkts));
 
-                const num_pkts_f = @as(f64, @floatFromInt(burst.@"2"));
-                for (0..burst.@"2") |i| {
+                for (0..num_pkts) |i| {
                     if (input_burst_idx >= input_bursts.len) {
                         @panic("Ran out of input bursts!");
                     }
@@ -255,16 +296,16 @@ fn generate_bursts(
                         input_burst_idx += 1;
                     }
                     const i_f = @as(f64, @floatFromInt(i));
-                    pkt.time = burst.@"0" + i_f * (burst.@"1" - burst.@"0") / num_pkts_f; // Distribute packets uniformly over burst duration
+                    pkt.time = start_time + i_f * (end_time - start_time) / num_pkts_f; // Distribute packets uniformly over burst duration
                     try packets.append(pkt);
                 }
 
                 const key = time.FlowKey{
                     .saddr = src_map.get(input_key.saddr) orelse @panic("source address not in AddrMap!"),
-                    .daddr = dst_map.get(input_key.daddr) orelse @panic("destination address not in AddrMap!")
+                    .daddr = dst_map.get(input_key.daddr) orelse @panic("destination address not in AddrMap!"),
                 };
 
-                const new_burst = Burst.init(key, burst.@"0", burst.@"1", packets);
+                const new_burst = Burst.init(key, start_time, end_time, packets);
                 try bursts.add(new_burst);
             }
         }

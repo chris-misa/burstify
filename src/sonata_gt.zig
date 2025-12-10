@@ -42,6 +42,7 @@ pub fn main() !void {
 
     // Loop over different trace-generation targets
     var threads = try std.ArrayList(std.Thread).initCapacity(allocator, config.value.targets.len);
+    defer threads.deinit();
 
     for (config.value.targets, 0..) |target, i| {
         std.debug.print("Starting target {s}\n", .{target.output_pcap});
