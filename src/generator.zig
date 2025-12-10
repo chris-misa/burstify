@@ -68,7 +68,7 @@ pub const Generator = struct {
             }
         }.f, addr_params.dst_sigma);
 
-        var bursts = try generate_bursts(allocator, rand, src_map, dst_map, &flows.flows, time_params);
+        var bursts: BurstQueue = try generate_bursts(allocator, rand, src_map, dst_map, &flows.flows, time_params);
         var active_bursts = BurstQueue.init(allocator, {});
         const first_burst = bursts.remove();
         try active_bursts.add(first_burst);
@@ -190,9 +190,11 @@ fn generate_bursts(
     var it = flows.iterator();
     while (it.next()) |elem| {
 
+        const input_key: *time.FlowKey = elem.key_ptr;
+        const input_bursts: []time.Burst = elem.value_ptr.items;
+
         // Count total packets
         var pkts: usize = 0;
-        const input_bursts = elem.value_ptr.items;
         for (input_bursts) |burst| {
             pkts += burst.packets.items.len;
         }
@@ -206,20 +208,33 @@ fn generate_bursts(
             // Avoid overheads of generating bursts for single-packet flows
             // Just take packet's arrival time as uniform random in range implied by duration
 
-            var packets = try std.ArrayList(time.Packet).initCapacity(allocator, 1);
-            const pkt_time = rand.float(f64) * time_params.total_duration;
             var pkt = input_bursts[0].packets.items[0];
-            pkt.time = pkt_time;
+            pkt.time = rand.float(f64) * time_params.total_duration;
+
+            var packets = try std.ArrayList(time.Packet).initCapacity(allocator, 1);
             try packets.append(pkt);
 
-            const key = time.FlowKey{ .saddr = src_map.get(elem.key_ptr.saddr) orelse @panic("source address not in AddrMap!"), .daddr = dst_map.get(elem.key_ptr.daddr) orelse @panic("destination address not in AddrMap!") };
+            const key = time.FlowKey{
+                .saddr = src_map.get(input_key.saddr) orelse @panic("source address not in AddrMap!"),
+                .daddr = dst_map.get(input_key.daddr) orelse @panic("destination address not in AddrMap!")
+            };
 
-            const new_burst = Burst.init(key, pkt_time, pkt_time, packets);
+            const new_burst = Burst.init(key, pkt.time, pkt.time, packets);
             try bursts.add(new_burst);
+
         } else {
 
             // Generate synth bursts
-            const synth_bursts = try time.generate(time_params.a_on, time_params.m_on, time_params.a_off, time_params.m_off, @intCast(pkts), time_params.total_duration, rand, allocator);
+            const synth_bursts: []struct { f64, f64, u32 } = try time.generate(
+                time_params.a_on,
+                time_params.m_on,
+                time_params.a_off,
+                time_params.m_off,
+                @intCast(pkts),
+                time_params.total_duration,
+                rand,
+                allocator
+            );
             defer allocator.free(synth_bursts);
 
             // Copy packets from this flow into synth bursts
@@ -244,7 +259,10 @@ fn generate_bursts(
                     try packets.append(pkt);
                 }
 
-                const key = time.FlowKey{ .saddr = src_map.get(elem.key_ptr.saddr) orelse @panic("source address not in AddrMap!"), .daddr = dst_map.get(elem.key_ptr.daddr) orelse @panic("destination address not in AddrMap!") };
+                const key = time.FlowKey{
+                    .saddr = src_map.get(input_key.saddr) orelse @panic("source address not in AddrMap!"),
+                    .daddr = dst_map.get(input_key.daddr) orelse @panic("destination address not in AddrMap!")
+                };
 
                 const new_burst = Burst.init(key, burst.@"0", burst.@"1", packets);
                 try bursts.add(new_burst);

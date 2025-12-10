@@ -62,6 +62,14 @@ fn run_target(allocator: std.mem.Allocator, rand: std.Random, flows: *const time
     var generator = try gen.Generator.init(allocator, rand, flows, target.time, target.addr);
     defer generator.deinit();
 
+    // hacked
+    {
+        var it = generator.bursts.iterator();
+        while (it.next()) |burst| {
+            std.debug.print("{}, {}, {}\n", .{burst.start_time, burst.end_time, burst.packets.items.len});
+        }
+    }
+    
     const threshold = 45;
     const epoch_duration: f64 = 1.0;
 
