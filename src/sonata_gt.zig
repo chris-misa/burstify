@@ -64,12 +64,19 @@ fn run_target(allocator: std.mem.Allocator, rand: std.Random, flows: *const time
 
     // hacked
     {
+        const filename = try util.strcat(allocator, target.output_pcap, ".bursts.csv");
+        defer allocator.free(filename);
+        const outfile = try std.fs.cwd().createFile(filename, .{});
+        defer outfile.close();
+        const out = outfile.writer();
+        try out.print("start_time,end_time,pkts\n", .{});
+
         var it = generator.bursts.iterator();
         while (it.next()) |burst| {
-            std.debug.print("{}, {}, {}\n", .{burst.start_time, burst.end_time, burst.packets.items.len});
+            try out.print("{}, {}, {}\n", .{ burst.start_time, burst.end_time, burst.packets.items.len });
         }
     }
-    
+
     const threshold = 45;
     const epoch_duration: f64 = 1.0;
 
