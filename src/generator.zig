@@ -268,6 +268,7 @@ fn generate_bursts(
                 time_params.m_on,
                 time_params.a_off,
                 time_params.m_off,
+                @intCast(input_bursts.len),
                 @intCast(pkts),
                 time_params.total_duration,
                 rand,
@@ -278,12 +279,14 @@ fn generate_bursts(
             // Copy packets from this flow into synth bursts
             var input_burst_idx: u32 = 0;
             var input_pkt_idx: u32 = 0;
+
             for (synth_bursts) |burst| {
-                var packets = try std.ArrayList(time.Packet).initCapacity(allocator, 1);
                 const start_time: f64 = burst.@"0";
                 const end_time: f64 = burst.@"1";
                 const num_pkts: u32 = burst.@"2";
                 const num_pkts_f = @as(f64, @floatFromInt(num_pkts));
+
+                var packets = try std.ArrayList(time.Packet).initCapacity(allocator, num_pkts);
 
                 for (0..num_pkts) |i| {
                     if (input_burst_idx >= input_bursts.len) {

@@ -176,7 +176,7 @@ pub const TimeAnalyzer = struct {
 
 ///
 /// Generate a sequence of bursts, denoted by {start_time, end_time, num_packets} tuples that
-/// have Pareto on and off times with the specified shape parameters and are clamped to
+/// have Pareto on and off times with the specified shape parameters and are normalized to
 /// fill the given duration (in seconds) and contain the total number of packets.
 ///
 /// Caller is responsible for freeing the result.
@@ -186,16 +186,12 @@ pub fn generate(
     m_on: f64,
     a_off: f64,
     m_off: f64,
+    num_bursts: u32,
     total_packets: u32,
     total_duration: f64,
     rand: std.Random,
     allocator: std.mem.Allocator,
 ) error{OutOfMemory}![]struct { f64, f64, u32 } {
-    if (m_off >= total_duration) {
-        std.debug.print("Calling time.generate() with minimum off period longer than total duration ({d} >= {d})...would loop forever.\n", .{ m_off, total_duration });
-        @panic("Bad arguments to time.generate()");
-    }
-
     if (m_on <= 0.0 or m_off <= 0.0) {
         @panic("Can't have minimum value of Pareto distribution <= 0 (m_on or m_off)");
     }
@@ -203,60 +199,46 @@ pub fn generate(
         @panic("Can't have shape value of Pareto distribution <= 0 (a_on or a_off)");
     }
 
-    var res = try std.ArrayList(struct { f64, f64, u32 }).initCapacity(allocator, 1);
-    defer res.deinit();
-
-    // Advance over initial off period, making sure it's shorter than total duration
-    var cur: f64 = pareto(a_off, m_off, rand);
-    while (cur >= total_duration) {
-        cur = pareto(a_off, m_off, rand);
+    if (num_bursts > total_packets) {
+        @panic("Can't generate more bursts than the total number of packets");
     }
 
-    // Advance over the rest of duration
+    var output = try allocator.alloc(struct { f64, f64, u32 }, num_bursts);
+
+    // Get raw start and end times
+    var cur: f64 = pareto(a_off, m_off, rand);
     var total_on: f64 = 0.0;
-    while (cur < total_duration) {
-        var on_dur = pareto(a_on, m_on, rand);
-        if (cur + on_dur > total_duration) {
-            on_dur = total_duration - cur;
-        }
-        total_on += on_dur;
+    for (0..num_bursts) |i| {
+        const on_dur = pareto(a_on, m_on, rand);
         const off_dur = pareto(a_off, m_off, rand);
-        try res.append(.{ cur, cur + on_dur, 0 });
+        output[i] = .{ cur, cur + on_dur, 0 };
         cur += on_dur;
         cur += off_dur;
+        total_on += on_dur;
     }
 
-    // Compute mean packet rate and fill in packets per burst
-    // Quantize to total on dur * packet rate to ensure total_packets is preserved
-    const pkts_per_sec = @as(f64, @floatFromInt(total_packets)) / total_on;
-    var on_pos: f64 = 0.000000001;
-    var nonzero_count: u32 = 0;
-    for (res.items) |*burst| {
-        const off_pos = on_pos + (burst.*.@"1" - burst.*.@"0");
+    // Normalize to total_duration
+    for (output) |*burst| {
+        burst.*.@"0" *= (total_duration / cur);
+        burst.*.@"1" *= (total_duration / cur);
+    }
+    total_on *= (total_duration / cur);
 
+    // Distribute packets
+    const aux_pkts = total_packets - num_bursts; // Reserve one packet per burst; only distribute remaining packets.
+    const pkts_per_sec = @as(f64, @floatFromInt(aux_pkts)) / total_on;
+    var on_pos: f64 = 0.000000001;
+    for (output) |*burst| {
+        const start_time = burst.@"0";
+        const end_time = burst.@"1";
+        const off_pos = on_pos + (end_time - start_time);
         const on_pos_pkts = on_pos * pkts_per_sec;
         const off_pos_pkts = off_pos * pkts_per_sec;
-
-        const pkts: u32 = @as(u32, @intFromFloat(@floor(off_pos_pkts))) - @as(u32, @intFromFloat(@floor(on_pos_pkts)));
+        const pkts = 1 + (@as(u32, @intFromFloat(@floor(off_pos_pkts))) - @as(u32, @intFromFloat(@floor(on_pos_pkts))));
 
         burst.*.@"2" = pkts;
         on_pos = off_pos;
-
-        if (pkts > 0) {
-            nonzero_count += 1;
-        }
     }
-
-    // Write the non-zero results into the output
-    var output = try allocator.alloc(struct { f64, f64, u32 }, nonzero_count);
-    var i: u32 = 0;
-    for (res.items) |burst| {
-        if (burst.@"2" > 0) {
-            output[i] = burst;
-            i += 1;
-        }
-    }
-
     return output;
 }
 
