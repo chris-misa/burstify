@@ -43,9 +43,13 @@ pub fn main() !void {
     defer allocator.free(bursts);
 
     const stdout = std.io.getStdOut().writer();
+    var synth_pkts: u32 = 0;
 
     try stdout.print("start_time,end_time,pkts\n", .{});
     for (bursts) |burst| {
         try stdout.print("{d},{d},{d}\n", .{ burst.@"0", burst.@"1", burst.@"2" });
+        synth_pkts += burst.@"2";
     }
+
+    try stdout.print("Total packets: {d}\n", .{synth_pkts});
 }

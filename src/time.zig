@@ -179,6 +179,10 @@ pub const TimeAnalyzer = struct {
 /// have Pareto on and off times with the specified shape parameters and are normalized to
 /// fill the given duration (in seconds) and contain the total number of packets.
 ///
+/// Because of rounding errors, the total number of packets in the generated bursts might not
+/// exactly equal the requested number of packets. However, it is guaranteed to be less than
+/// or equal to the requested number.
+///
 /// Caller is responsible for freeing the result.
 ///
 pub fn generate(
@@ -228,15 +232,20 @@ pub fn generate(
     const aux_pkts = total_packets - num_bursts; // Reserve one packet per burst; only distribute remaining packets.
     const pkts_per_sec = @as(f64, @floatFromInt(aux_pkts)) / total_on;
     var on_pos: f64 = 0.000000001;
+    var remaining_pkts = aux_pkts;
     for (output) |*burst| {
         const start_time = burst.@"0";
         const end_time = burst.@"1";
-        const off_pos = on_pos + (end_time - start_time);
-        const on_pos_pkts = on_pos * pkts_per_sec;
-        const off_pos_pkts = off_pos * pkts_per_sec;
-        const pkts = 1 + (@as(u32, @intFromFloat(@floor(off_pos_pkts))) - @as(u32, @intFromFloat(@floor(on_pos_pkts))));
+        const off_pos = on_pos + (end_time - start_time) * pkts_per_sec;
+        var pkts = @as(u32, @intFromFloat(@floor(off_pos))) - @as(u32, @intFromFloat(@floor(on_pos)));
 
-        burst.*.@"2" = pkts;
+        // Because of rounding errors, the math here is not exact so enforce an exact upper bound.
+        if (pkts > remaining_pkts) {
+            pkts = remaining_pkts;
+        }
+        remaining_pkts -= pkts;
+
+        burst.*.@"2" = pkts + 1;
         on_pos = off_pos;
     }
     return output;
