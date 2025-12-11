@@ -276,6 +276,18 @@ fn generate_bursts(
             );
             defer allocator.free(synth_bursts);
 
+            // Optional sanity check
+            {
+                var synth_pkts: u32 = 0;
+                for (synth_bursts) |burst| {
+                    synth_pkts += burst.@"2";
+                }
+                if (synth_pkts != pkts) {
+                    std.debug.print("synth_pkts = {}, pkts = {}, input_bursts.len = {}\n", .{ synth_pkts, pkts, input_bursts.len });
+                    @panic("synth_pkts != pkts");
+                }
+            }
+
             // Copy packets from this flow into synth bursts
             var input_burst_idx: u32 = 0;
             var input_pkt_idx: u32 = 0;
@@ -290,6 +302,11 @@ fn generate_bursts(
 
                 for (0..num_pkts) |i| {
                     if (input_burst_idx >= input_bursts.len) {
+                        std.debug.print("pkts = {}, input_bursts.len = {}, num_pkts = {}\n", .{
+                            pkts,
+                            input_bursts.len,
+                            num_pkts,
+                        });
                         @panic("Ran out of input bursts!");
                     }
                     var pkt = input_bursts[input_burst_idx].packets.items[input_pkt_idx];
