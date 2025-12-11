@@ -64,7 +64,7 @@ pub const Generator = struct {
     active_bursts: BurstQueue,
 
     allocator: std.mem.Allocator,
-    rand: std.Random,
+    rand: *std.Random,
 
     ///
     /// Create a new Generator.
@@ -72,7 +72,7 @@ pub const Generator = struct {
     ///
     pub fn init(
         allocator: std.mem.Allocator,
-        rand: std.Random,
+        rand: *std.Random,
         flows: *const time.TimeAnalyzer,
         time_params: conf.TimeParameters,
         addr_params: conf.AddrParameters,
@@ -169,7 +169,7 @@ pub const Generator = struct {
 ///
 fn get_addr_map(
     allocator: std.mem.Allocator,
-    rand: std.Random,
+    rand: *std.Random,
     flows: *const time.FlowMap,
     comptime project: fn (time.FlowKey) u32,
     sigma: f64,
@@ -212,7 +212,7 @@ fn get_addr_map(
 ///
 fn generate_bursts(
     allocator: std.mem.Allocator,
-    rand: std.Random,
+    rand: *std.Random,
     src_map: addr.AddrMap,
     dst_map: addr.AddrMap,
     flows: *const time.FlowMap,
@@ -248,7 +248,7 @@ fn generate_bursts(
             }
 
             var pkt = input_bursts[0].packets.items[0];
-            pkt.time = rand.float(f64) * time_params.total_duration;
+            pkt.time = rand.*.float(f64) * time_params.total_duration;
 
             var packets = try std.ArrayList(time.Packet).initCapacity(allocator, 1);
             try packets.append(pkt);

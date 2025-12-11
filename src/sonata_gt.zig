@@ -47,10 +47,7 @@ pub fn main() !void {
     for (config.value.targets, 0..) |target, i| {
         std.debug.print("Starting target {s}\n", .{target.output_pcap});
 
-        var rand_gen = std.Random.DefaultPrng.init(12345 + i);
-        const rand = rand_gen.random();
-
-        const thread = try std.Thread.spawn(.{}, run_target, .{ allocator, rand, &flows, target });
+        const thread = try std.Thread.spawn(.{}, run_target, .{ allocator, 12345 + i, &flows, target });
         try threads.append(thread);
     }
 
@@ -59,8 +56,11 @@ pub fn main() !void {
     }
 }
 
-fn run_target(allocator: std.mem.Allocator, rand: std.Random, flows: *const time.TimeAnalyzer, target: conf.Target) !void {
-    var generator = try gen.Generator.init(allocator, rand, flows, target.time, target.addr);
+fn run_target(allocator: std.mem.Allocator, seed: usize, flows: *const time.TimeAnalyzer, target: conf.Target) !void {
+    var rand_gen = std.Random.DefaultPrng.init(seed);
+    const rand: std.Random = rand_gen.random();
+
+    var generator = try gen.Generator.init(allocator, @constCast(&rand), flows, target.time, target.addr);
     defer generator.deinit();
 
     // hacked

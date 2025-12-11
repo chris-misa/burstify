@@ -193,7 +193,7 @@ pub fn generate(
     num_bursts: u32,
     total_packets: u32,
     total_duration: f64,
-    rand: std.Random,
+    rand: *std.Random,
     allocator: std.mem.Allocator,
 ) error{OutOfMemory}![]struct { f64, f64, u32 } {
     if (m_on <= 0.0 or m_off <= 0.0) {
@@ -251,6 +251,6 @@ pub fn generate(
     return output;
 }
 
-pub fn pareto(a: f64, m: f64, rand: std.Random) f64 {
-    return m * @exp(rand.floatExp(f64) / a);
+pub fn pareto(a: f64, m: f64, rand: *std.Random) f64 {
+    return m * @exp(rand.*.floatExp(f64) / a);
 }

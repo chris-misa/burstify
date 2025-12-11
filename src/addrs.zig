@@ -38,7 +38,6 @@ pub const AddrAnalyzerError = error{AddingToAlreadyBuiltMap};
 /// Note that the analysis functions automatically form the prefix tree (by calling AddrAnalyzer.prefixify()) so you can't add more addresses after calling them.
 ///
 pub const AddrAnalyzer = struct {
-
     /// data is an array of maps where the array index is the prefix length,
     /// the map key is the base address of each prefix, and
     /// the map value is a tuple of { number-of-addresses, weight }.
@@ -185,10 +184,7 @@ pub const AddrAnalyzer = struct {
     ///
     /// TODO: find a way to implement all the sums in here using tree-fold for better numeric precision.
     ///
-    pub fn structure_function(
-        self: *AddrAnalyzer,
-        allocator: std.mem.Allocator
-    ) error{OutOfMemory}![] struct { f64, f64, f64 } {
+    pub fn structure_function(self: *AddrAnalyzer, allocator: std.mem.Allocator) error{OutOfMemory}![]struct { f64, f64, f64 } {
         if (!self.is_prefixified) {
             try self.prefixify();
         }
@@ -211,7 +207,7 @@ pub const AddrAnalyzer = struct {
                 }
                 break :blk s;
             };
-        
+
             for (0..61, 0..) |q_i, q_idx| {
                 const q = @as(f64, @floatFromInt(@as(i32, @intCast(q_i)) - 20)) / 10.0;
 
@@ -251,19 +247,14 @@ pub const AddrAnalyzer = struct {
                             const right_child_key = elem.key_ptr.* | @as(u32, @truncate(@as(u64, 1) << @truncate(32 - (pl + 1))));
                             const right_child =
                                 if (self.data[pl + 1].get(right_child_key)) |c| std.math.pow(f64, c.@"1" / total, q) else 0.0;
-                            d2 += std.math.pow(
-                                f64,
-                                (std.math.pow(f64, elem.value_ptr.*.@"1" / total, q) / thisZ)
-                                    - ((left_child + right_child) / nextZ),
-                                2
-                            );
+                            d2 += std.math.pow(f64, (std.math.pow(f64, elem.value_ptr.*.@"1" / total, q) / thisZ) - ((left_child + right_child) / nextZ), 2);
                         }
                     }
                     break :blk d2;
                 };
 
                 out[q_idx].@"0" = q;
-                
+
                 // Running mean of tau values over pls
                 out[q_idx].@"1" += (tau - out[q_idx].@"1") / out_count;
 
@@ -277,7 +268,7 @@ pub const AddrAnalyzer = struct {
             elem.*.@"2" = @sqrt(elem.*.@"2") / out_count;
         }
         // .. something's messed up with this sd estimation, esp for small q. Might just be numeric precision issues.
-        
+
         return out;
     }
 
@@ -334,8 +325,8 @@ pub const AddrAnalyzer = struct {
 pub fn generate(
     sigma: f64,
     n: u32,
-    rand: std.Random,
-    allocator: std.mem.Allocator
+    rand: *std.Random,
+    allocator: std.mem.Allocator,
 ) error{OutOfMemory}!std.ArrayList(struct { u32, f64 }) {
     const root = Prefix{ .base = 0, .len = 0 };
     var res = try std.ArrayList(struct { u32, f64 }).initCapacity(allocator, n);
@@ -349,9 +340,9 @@ fn gen_rec(
     total: u32,
     pfx: Prefix,
     n: u32,
-    rand: std.Random,
+    rand: *std.Random,
     res: *std.ArrayList(struct { u32, f64 }),
-    slope: SlopeFitter
+    slope: SlopeFitter,
 ) error{OutOfMemory}!void {
     if (n == 0) {
         return;
@@ -359,7 +350,7 @@ fn gen_rec(
         const alpha = slope.fit();
         try res.append(.{ pfx.base, alpha });
     } else {
-        const normal: f64 = rand.floatNorm(f64) * sigma;
+        const normal: f64 = rand.*.floatNorm(f64) * sigma;
         const w: f64 = 1.0 / (1 + @exp(-normal)); // w ~ logit-normal(sigma)
         const left_count: u32 = @intFromFloat(@round(@as(f64, @floatFromInt(n)) * w));
         const right_count: u32 = @intFromFloat(@round(@as(f64, @floatFromInt(n)) * (1.0 - w)));
@@ -427,16 +418,11 @@ pub const AddrMap = struct {
     /// Constructs an AddrMap from the given lists of (address, alpha(address)) pairs.
     /// The lists end up sorted.
     ///
-    pub fn init(
-        allocator: std.mem.Allocator,
-        rand: std.Random,
-        from: []struct { u32, f64 },
-        to: []struct { u32, f64 }
-    ) error{OutOfMemory}!AddrMap {
+    pub fn init(allocator: std.mem.Allocator, rand: *std.Random, from: []struct { u32, f64 }, to: []struct { u32, f64 }) error{OutOfMemory}!AddrMap {
         var map = std.AutoHashMap(u32, u32).init(allocator);
 
-        rand.shuffle(struct { u32, f64 }, from);
-        rand.shuffle(struct { u32, f64 }, to);
+        rand.*.shuffle(struct { u32, f64 }, from);
+        rand.*.shuffle(struct { u32, f64 }, to);
 
         const comp = struct {
             fn lt(_: void, l: struct { u32, f64 }, r: struct { u32, f64 }) bool {
