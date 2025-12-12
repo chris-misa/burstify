@@ -220,6 +220,8 @@ fn generate_bursts(
 ) error{OutOfMemory}!BurstQueue {
     var bursts = BurstQueue.init(allocator, {});
 
+    var burst_process = bp.BurstGenerator.init(allocator, rand, time_params);
+    // TODO: continue here...
     // const flow_count = flows.count();
     // var flow_idx: u32 = 0;
 
