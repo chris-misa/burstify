@@ -79,11 +79,7 @@ pub const BurstGenerator = struct {
             // If this burst extends over total_duration, chop it and set up to start on next time.
             if (burst.end_time > self.conf.total_duration) {
                 self.start_on = true;
-                self.start_offset = blk: {
-                    var res = burst.end_time;
-                    while (res > self.conf.total_duration) res -= self.conf.total_duration;
-                    break :blk res;
-                };
+                self.start_offset = @mod(burst.end_time, self.conf.total_duration);
                 burst.end_time = self.conf.total_duration;
                 total_on += burst.end_time - burst.start_time;
                 try temp_bursts.append(burst);
@@ -98,9 +94,7 @@ pub const BurstGenerator = struct {
             if (cur >= self.conf.total_duration) {
 
                 // Move cur back by total_duration and update start_offset for next time
-                while (cur >= self.conf.total_duration) {
-                    cur -= self.conf.total_duration;
-                }
+                cur = @mod(cur, self.conf.total_duration);
                 self.start_offset = cur;
                 break;
             }
