@@ -57,6 +57,7 @@ pub fn main() !void {
 }
 
 fn run_target(seed: usize, flows: *const time.TimeAnalyzer, target: conf.Target) !void {
+    // Per-thread allocators actually make this slower (?)
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
     defer {
@@ -204,7 +205,6 @@ const DDoS = struct {
     }
 
     pub fn process(self: *Self, key: time.FlowKey, pkt: time.Packet) (std.io.AnyWriter.Error || error{OutOfMemory})!void {
-        self.*.tot_pkts += 1;
         if (self.common.check_epoch(pkt.time)) {
             try self.output();
             self.*.tot_pkts = 0;
@@ -221,6 +221,7 @@ const DDoS = struct {
                 try self.reduce.put(key.daddr, 1);
             }
         }
+        self.*.tot_pkts += 1;
     }
 
     pub fn output(self: *Self) (std.io.AnyWriter.Error || error{OutOfMemory})!void {
