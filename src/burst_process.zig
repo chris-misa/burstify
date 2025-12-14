@@ -103,9 +103,21 @@ pub const BurstGenerator = struct {
         // Distribute packets based on uniform mapping between on time and the total number of packets
         const pkts_per_sec = @as(f64, @floatFromInt(num_pkts)) / total_on;
         // var on_pos: f64 = 0.000000001; // to make sure the final floor reaches the last packet
-        var on_pos: f64 = self.rand.*.float(f64); // initialize between 0 and 1 packets
+        // var on_pos: f64 = self.rand.*.float(f64); // initialize between 0 and 1 packets
+
+        var on_pos: f64 = 0.0;
         var num_nonzero: u32 = 0;
-        for (temp_bursts.items) |*burst| {
+
+        // Construct a random order to go through bursts
+        const burst_idx: []usize = try self.allocator.alloc(usize, temp_bursts.items.len);
+        defer self.allocator.free(burst_idx);
+        for (burst_idx, 0..) |*idx, i| {
+            idx.* = i;
+        }
+        self.rand.*.shuffle(usize, burst_idx);
+
+        for (burst_idx) |idx| {
+            const burst = &temp_bursts.items[idx];
             const off_pos = on_pos + (burst.end_time - burst.start_time) * pkts_per_sec;
             const pkts = @as(u32, @intFromFloat(@floor(off_pos))) - @as(u32, @intFromFloat(@floor(on_pos)));
 
