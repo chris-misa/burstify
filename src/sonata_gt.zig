@@ -47,7 +47,7 @@ pub fn main() !void {
     for (config.value.targets, 0..) |target, i| {
         std.debug.print("Starting target {s}\n", .{target.output_pcap});
 
-        const thread = try std.Thread.spawn(.{}, run_target, .{ allocator, 12345 + i, &flows, target });
+        const thread = try std.Thread.spawn(.{}, run_target, .{ 12345 + i, &flows, target });
         try threads.append(thread);
     }
 
@@ -56,14 +56,22 @@ pub fn main() !void {
     }
 }
 
-fn run_target(allocator: std.mem.Allocator, seed: usize, flows: *const time.TimeAnalyzer, target: conf.Target) !void {
+fn run_target(seed: usize, flows: *const time.TimeAnalyzer, target: conf.Target) !void {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    const allocator = gpa.allocator();
+    defer {
+        const deinit_status = gpa.deinit();
+        // fail test; can't try in defer as defer is executed after we return
+        if (deinit_status == .leak) @panic("TEST FAIL: leaked memory");
+    }
+
     var rand_gen = std.Random.DefaultPrng.init(seed);
     const rand: std.Random = rand_gen.random();
 
     var generator = try gen.Generator.init(allocator, @constCast(&rand), flows, target.time, target.addr);
     defer generator.deinit();
 
-    // hacked
+    // Output list of all generated bursts for debugging
     {
         const filename = try util.strcat(allocator, target.output_pcap, ".bursts.csv");
         defer allocator.free(filename);
