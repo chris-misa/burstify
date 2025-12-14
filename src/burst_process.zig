@@ -105,7 +105,7 @@ pub const BurstGenerator = struct {
         // var on_pos: f64 = 0.000000001; // to make sure the final floor reaches the last packet
         // var on_pos: f64 = self.rand.*.float(f64); // initialize between 0 and 1 packets
 
-        var on_pos: f64 = 0.0;
+        var on_pos: f64 = 0.5;
         var num_nonzero: u32 = 0;
 
         // Construct a random order to go through bursts
