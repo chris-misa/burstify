@@ -168,6 +168,7 @@ const DDoS = struct {
     common: *QueryCommon,
     allocator: std.mem.Allocator,
 
+    tot_pkts: u64,
     distinct: std.AutoHashMap(struct { u32, u32 }, void),
     reduce: std.AutoHashMap(u32, u32),
     threshold: u32,
@@ -178,8 +179,15 @@ const DDoS = struct {
         const r = std.AutoHashMap(u32, u32).init(allocator);
         // Write output file headers
         try common.results_out.print("time,dst\n", .{});
-        try common.metadata_out.print("time,distinct_card,reduce_card\n", .{});
-        return DDoS{ .common = common, .allocator = allocator, .distinct = d, .reduce = r, .threshold = threshold };
+        try common.metadata_out.print("time,pkts,distinct_card,reduce_card\n", .{});
+        return DDoS{
+            .common = common,
+            .allocator = allocator,
+            .tot_pkts = 0,
+            .distinct = d,
+            .reduce = r,
+            .threshold = threshold,
+        };
     }
 
     pub fn deinit(self: *Self) void {
@@ -188,8 +196,10 @@ const DDoS = struct {
     }
 
     pub fn process(self: *Self, key: time.FlowKey, pkt: time.Packet) (std.io.AnyWriter.Error || error{OutOfMemory})!void {
+        self.*.tot_pkts += 1;
         if (self.common.check_epoch(pkt.time)) {
             try self.output();
+            self.*.tot_pkts = 0;
             self.distinct.clearRetainingCapacity();
             self.reduce.clearRetainingCapacity();
             self.common.advance_epoch();
@@ -217,7 +227,7 @@ const DDoS = struct {
             }
 
             // Output metadata counts
-            try self.common.metadata_out.print("{d},{d},{d}\n", .{ out_time, self.distinct.count(), self.reduce.count() });
+            try self.common.metadata_out.print("{d},{d},{d},{d}\n", .{ out_time, self.tot_pkts, self.distinct.count(), self.reduce.count() });
         } else {
             @panic("Trying to output query results before next_epoch is set!");
         }
