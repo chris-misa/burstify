@@ -241,28 +241,29 @@ fn generate_bursts(
         //     std.debug.print("{d}/{d}\n", .{ flow_idx, flow_count });
         // }
 
-        if (pkts == 1) {
-            // Avoid overheads of generating bursts for single-packet flows
-            // Just take packet's arrival time as uniform random in range implied by duration
-
-            if (input_bursts.len != 1 or input_bursts[0].packets.items.len != 1) {
-                @panic("in single-packet flow case, but the flow has more than one burst or packets!");
-            }
-
-            var pkt = input_bursts[0].packets.items[0];
-            pkt.time = rand.*.float(f64) * time_params.total_duration;
-
-            var packets = try std.ArrayList(time.Packet).initCapacity(allocator, 1);
-            try packets.append(pkt);
-
-            const key = time.FlowKey{
-                .saddr = src_map.get(input_key.saddr) orelse @panic("source address not in AddrMap!"),
-                .daddr = dst_map.get(input_key.daddr) orelse @panic("destination address not in AddrMap!"),
-            };
-
-            const new_burst = Burst.init(key, pkt.time, pkt.time, packets);
-            try bursts.add(new_burst);
-        } else {
+        // if (pkts == 1) {
+        //     // Avoid overheads of generating bursts for single-packet flows
+        //     // Just take packet's arrival time as uniform random in range implied by duration
+        //
+        //     if (input_bursts.len != 1 or input_bursts[0].packets.items.len != 1) {
+        //         @panic("in single-packet flow case, but the flow has more than one burst or packets!");
+        //     }
+        //
+        //     var pkt = input_bursts[0].packets.items[0];
+        //     pkt.time = rand.*.float(f64) * time_params.total_duration;
+        //
+        //     var packets = try std.ArrayList(time.Packet).initCapacity(allocator, 1);
+        //     try packets.append(pkt);
+        //
+        //     const key = time.FlowKey{
+        //         .saddr = src_map.get(input_key.saddr) orelse @panic("source address not in AddrMap!"),
+        //         .daddr = dst_map.get(input_key.daddr) orelse @panic("destination address not in AddrMap!"),
+        //     };
+        //
+        //     const new_burst = Burst.init(key, pkt.time, pkt.time, packets);
+        //     try bursts.add(new_burst);
+        // } else
+        {
 
             // Generate synth bursts
             const synth_bursts: []bp.BurstTimes = try burst_process.next(@intCast(pkts));
