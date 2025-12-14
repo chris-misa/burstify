@@ -312,6 +312,11 @@ fn generate_bursts(
                     try packets.append(pkt);
                 }
 
+                if (packets.items.len != burst.pkts) {
+                    std.debug.print("packets.items.len = {d}, burst.pkts = {d}\n", .{ packets.items.len, burst.pkts });
+                    @panic("This shouldn't happen");
+                }
+
                 const key = time.FlowKey{
                     .saddr = src_map.get(input_key.saddr) orelse @panic("source address not in AddrMap!"),
                     .daddr = dst_map.get(input_key.daddr) orelse @panic("destination address not in AddrMap!"),
