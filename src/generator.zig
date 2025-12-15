@@ -224,6 +224,63 @@ fn get_addr_map(
     return addr.AddrMap.init(allocator, rand, from_addrs, to_addrs.items);
 }
 
+pub const BurstTimes = struct {
+    start_time: f64,
+    end_time: f64,
+    pkts: u32,
+};
+
+pub fn pareto(a: f64, m: f64, rand: *std.Random) f64 {
+    return m * @exp(rand.*.floatExp(f64) / a);
+}
+
+///
+/// Generate a Pareto renewal process for a single flow
+///
+fn burst_process(
+    allocator: std.mem.Allocator,
+    rand: *std.Random,
+    config: conf.TimeParameters,
+    start: f64,
+    pkts: u32,
+) error{OutOfMemory}![]BurstTimes {
+    const pkts_per_sec: f64 = @as(f64, @floatFromInt(pkts)) / (config.total_duration - start);
+
+    var bursts = std.ArrayList(BurstTimes).init(allocator);
+
+    var cur = start;
+    var remaining_pkts = pkts;
+    while (cur < config.total_duration and remaining_pkts > 0) {
+        const on_dur = pareto(config.a_on, config.m_on, rand);
+        const off_dur = pareto(config.a_off, config.m_off, rand);
+        const burst_pkts = blk: {
+            const p = @as(u32, @intFromFloat(@floor(on_dur * pkts_per_sec))) + 1;
+            if (p < remaining_pkts) {
+                break :blk p;
+            } else {
+                break :blk remaining_pkts;
+            }
+        };
+        var burst = BurstTimes{
+            .start_time = cur,
+            .end_time = cur + on_dur,
+            .pkts = burst_pkts,
+        };
+
+        cur += on_dur;
+        cur += off_dur;
+        remaining_pkts -= burst_pkts;
+
+        if (burst.end_time > config.total_duration) {
+            burst.end_time = config.total_duration;
+            burst.pkts += remaining_pkts;
+        }
+        try bursts.append(burst);
+    }
+
+    return bursts.toOwnedSlice();
+}
+
 ///
 /// Generate synthetic bursts and collect in a BurstQueue
 ///
@@ -235,121 +292,110 @@ fn generate_bursts(
     flows: *const time.FlowMap,
     time_params: conf.TimeParameters,
 ) error{OutOfMemory}!BurstQueue {
+
+    // Generate flow arrival process
+    const num_flows = flows.count();
+    const flow_starts = try allocator.alloc(f64, num_flows);
+    defer allocator.free(flow_starts);
+    for (flow_starts) |*start| {
+        start.* = rand.*.float(f64) * time_params.total_duration;
+    }
+    std.mem.sort(
+        f64,
+        flow_starts,
+        {},
+        struct {
+            pub fn lt(context: void, l: f64, r: f64) bool {
+                _ = context;
+                return l < r;
+            }
+        }.lt,
+    );
+
+    // Sort flow keys based on time of first packet
+    const flow_keys = try allocator.alloc(struct { time.FlowKey, f64 }, num_flows);
+    defer allocator.free(flow_keys);
+    {
+        var it = flows.iterator();
+        var i: u32 = 0;
+        while (it.next()) |elem| {
+            flow_keys[i].@"0" = elem.key_ptr.*;
+            flow_keys[i].@"1" = elem.value_ptr.*.items[0].packets.items[0].time;
+            i += 1;
+        }
+    }
+    std.mem.sort(
+        struct { time.FlowKey, f64 },
+        flow_keys,
+        {},
+        struct {
+            pub fn lt(context: void, l: struct { time.FlowKey, f64 }, r: struct { time.FlowKey, f64 }) bool {
+                _ = context;
+                return l.@"1" < r.@"1";
+            }
+        }.lt,
+    );
+
+    // Generate burst processes for each flow
     var bursts = BurstQueue.init(allocator, {});
 
-    var burst_process = bp.BurstGenerator.init(allocator, rand, time_params);
-    // const flow_count = flows.count();
-    // var flow_idx: u32 = 0;
+    for (0..num_flows) |i| {
+        const key = flow_keys[i].@"0";
+        const in_bursts = flows.get(key).?.items;
+        const out_flow_start = flow_starts[i];
 
-    var it = flows.iterator();
-    while (it.next()) |elem| {
-        const input_key: *time.FlowKey = elem.key_ptr;
-        const input_bursts: []time.Burst = elem.value_ptr.items;
-
-        // Count total packets
         var pkts: usize = 0;
-        for (input_bursts) |burst| {
+        for (in_bursts) |burst| {
             pkts += burst.packets.items.len;
         }
 
-        // flow_idx += 1;
-        // if (flow_idx % 10000 == 0) {
-        //     std.debug.print("{d}/{d}\n", .{ flow_idx, flow_count });
-        // }
+        const synth_bursts: []BurstTimes = try burst_process(
+            allocator,
+            rand,
+            time_params,
+            out_flow_start,
+            @intCast(pkts),
+        );
+        defer allocator.free(synth_bursts);
 
-        // if (pkts == 1) {
-        //     // Avoid overheads of generating bursts for single-packet flows
-        //     // Just take packet's arrival time as uniform random in range implied by duration
-        //
-        //     if (input_bursts.len != 1 or input_bursts[0].packets.items.len != 1) {
-        //         @panic("in single-packet flow case, but the flow has more than one burst or packets!");
-        //     }
-        //
-        //     var pkt = input_bursts[0].packets.items[0];
-        //     pkt.time = rand.*.float(f64) * time_params.total_duration;
-        //
-        //     var packets = try std.ArrayList(time.Packet).initCapacity(allocator, 1);
-        //     try packets.append(pkt);
-        //
-        //     const key = time.FlowKey{
-        //         .saddr = src_map.get(input_key.saddr) orelse @panic("source address not in AddrMap!"),
-        //         .daddr = dst_map.get(input_key.daddr) orelse @panic("destination address not in AddrMap!"),
-        //     };
-        //
-        //     const new_burst = Burst.init(key, pkt.time, pkt.time, packets);
-        //     try bursts.add(new_burst);
-        // } else
-        {
+        var in_burst_idx: u32 = 0;
+        var in_pkt_idx: u32 = 0;
+        for (synth_bursts) |burst| {
+            var packets = try std.ArrayList(time.Packet).initCapacity(allocator, burst.pkts);
 
-            // Generate synth bursts
-            const synth_bursts: []bp.BurstTimes = try burst_process.next(@intCast(pkts));
-            // const synth_bursts: []struct { f64, f64, u32 } = try time.generate(
-            //     time_params.a_on,
-            //     time_params.m_on,
-            //     time_params.a_off,
-            //     time_params.m_off,
-            //     @intCast(input_bursts.len),
-            //     @intCast(pkts),
-            //     time_params.total_duration,
-            //     rand,
-            //     allocator,
-            // );
-            defer allocator.free(synth_bursts);
-
-            // Copy packets from this flow into synth bursts
-            var input_burst_idx: u32 = 0;
-            var input_pkt_idx: u32 = 0;
-
-            for (synth_bursts) |burst| {
-                // const start_time: f64 = burst.@"0";
-                // const end_time: f64 = burst.@"1";
-                // const num_pkts: u32 = burst.@"2";
-                // const num_pkts_f = @as(f64, @floatFromInt(num_pkts));
-                // const num_pkts_f = @as(f64, @floatFromInt(burst.pkts));
-
-                var packets = try std.ArrayList(time.Packet).initCapacity(allocator, burst.pkts);
-
-                for (0..burst.pkts) |_| {
-                    if (input_burst_idx >= input_bursts.len) {
-                        std.debug.print("pkts = {}, input_bursts.len = {}, num_pkts = {}\n", .{
-                            pkts,
-                            input_bursts.len,
-                            burst.pkts,
-                        });
-                        @panic("Ran out of input bursts!");
-                    }
-                    var pkt = input_bursts[input_burst_idx].packets.items[input_pkt_idx];
-                    input_pkt_idx += 1;
-                    if (input_pkt_idx >= input_bursts[input_burst_idx].packets.items.len) {
-                        input_pkt_idx = 0;
-                        input_burst_idx += 1;
-                    }
-                    // const i_f = @as(f64, @floatFromInt(i));
-                    pkt.time = burst.start_time + rand.*.float(f64) * (burst.end_time - burst.start_time);
-
-                    // pkt.time = burst.start_time + i_f * (burst.end_time - burst.start_time) / num_pkts_f; // Distribute packets uniformly over burst duration
-                    try packets.append(pkt);
+            for (0..burst.pkts) |_| {
+                if (in_burst_idx >= in_bursts.len) {
+                    std.debug.print("pkts = {}, in_bursts.len = {}, num_pkts = {}\n", .{
+                        pkts,
+                        in_bursts.len,
+                        burst.pkts,
+                    });
+                    @panic("Ran out of input bursts!");
                 }
-                if (packets.items.len != burst.pkts) {
-                    std.debug.print("packets.items.len = {d}, burst.pkts = {d}\n", .{ packets.items.len, burst.pkts });
-                    @panic("This shouldn't happen");
+                var pkt = in_bursts[in_burst_idx].packets.items[in_pkt_idx];
+                in_pkt_idx += 1;
+                if (in_pkt_idx >= in_bursts[in_burst_idx].packets.items.len) {
+                    in_pkt_idx = 0;
+                    in_burst_idx += 1;
                 }
-
-                // Sort packets in burst
-                std.mem.sort(time.Packet, packets.items, {}, time.Packet.lessThan);
-
-                // Take burst start and end from packet timestamps
-                const start_time = packets.items[0].time;
-                const end_time = packets.items[packets.items.len - 1].time;
-
-                const key = time.FlowKey{
-                    .saddr = src_map.get(input_key.saddr) orelse @panic("source address not in AddrMap!"),
-                    .daddr = dst_map.get(input_key.daddr) orelse @panic("destination address not in AddrMap!"),
-                };
-
-                const new_burst = Burst.init(key, start_time, end_time, packets);
-                try bursts.add(new_burst);
+                pkt.time = burst.start_time + rand.*.float(f64) * (burst.end_time - burst.start_time);
+                try packets.append(pkt);
             }
+
+            // Sort packets in burst
+            std.mem.sort(time.Packet, packets.items, {}, time.Packet.lessThan);
+
+            // Take burst start and end from packet timestamps
+            const start_time = packets.items[0].time;
+            const end_time = packets.items[packets.items.len - 1].time;
+
+            const out_key = time.FlowKey{
+                .saddr = src_map.get(key.saddr) orelse @panic("source address not in AddrMap!"),
+                .daddr = dst_map.get(key.daddr) orelse @panic("destination address not in AddrMap!"),
+            };
+
+            const new_burst = Burst.init(out_key, start_time, end_time, packets);
+            try bursts.add(new_burst);
         }
     }
 
