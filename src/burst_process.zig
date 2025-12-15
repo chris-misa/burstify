@@ -84,19 +84,19 @@ pub const BurstGenerator = struct {
                 total_on += burst.end_time - burst.start_time;
                 try temp_bursts.append(burst);
                 break;
-            }
+            } else {
+                total_on += on_dur;
+                try temp_bursts.append(burst);
+                cur += (on_dur + off_dur);
 
-            total_on += on_dur;
-            try temp_bursts.append(burst);
-            cur += (on_dur + off_dur);
+                // If the off period after this burst extends over total duration, chop it and set up to start off next time.
+                if (cur >= self.conf.total_duration) {
 
-            // If the off period after this burst extends over total duration, chop it and set up to start off next time.
-            if (cur >= self.conf.total_duration) {
-
-                // Move cur back by total_duration and update start_offset for next time
-                cur = @mod(cur, self.conf.total_duration);
-                self.start_offset = cur;
-                break;
+                    // Move cur back by total_duration and update start_offset for next time
+                    cur = @mod(cur, self.conf.total_duration);
+                    self.start_offset = cur;
+                    break;
+                }
             }
         }
 
@@ -111,8 +111,8 @@ pub const BurstGenerator = struct {
         // Construct a random order to go through bursts
         const burst_idx: []usize = try self.allocator.alloc(usize, temp_bursts.items.len);
         defer self.allocator.free(burst_idx);
-        for (burst_idx, 0..) |*idx, i| {
-            idx.* = i;
+        for (0..burst_idx.len) |i| {
+            burst_idx[i] = i;
         }
         self.rand.*.shuffle(usize, burst_idx);
 

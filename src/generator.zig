@@ -289,11 +289,11 @@ fn generate_bursts(
                 // const end_time: f64 = burst.@"1";
                 // const num_pkts: u32 = burst.@"2";
                 // const num_pkts_f = @as(f64, @floatFromInt(num_pkts));
-                const num_pkts_f = @as(f64, @floatFromInt(burst.pkts));
+                // const num_pkts_f = @as(f64, @floatFromInt(burst.pkts));
 
                 var packets = try std.ArrayList(time.Packet).initCapacity(allocator, burst.pkts);
 
-                for (0..burst.pkts) |i| {
+                for (0..burst.pkts) |_| {
                     if (input_burst_idx >= input_bursts.len) {
                         std.debug.print("pkts = {}, input_bursts.len = {}, num_pkts = {}\n", .{
                             pkts,
@@ -308,8 +308,9 @@ fn generate_bursts(
                         input_pkt_idx = 0;
                         input_burst_idx += 1;
                     }
-                    const i_f = @as(f64, @floatFromInt(i));
-                    pkt.time = burst.start_time + i_f * (burst.end_time - burst.start_time) / num_pkts_f; // Distribute packets uniformly over burst duration
+                    // const i_f = @as(f64, @floatFromInt(i));
+                    pkt.time = burst.start_time + rand.*.float(f64) * (burst.end_time - burst.start_time);
+                    // pkt.time = burst.start_time + i_f * (burst.end_time - burst.start_time) / num_pkts_f; // Distribute packets uniformly over burst duration
                     try packets.append(pkt);
                 }
 
