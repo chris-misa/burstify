@@ -212,7 +212,7 @@ const DDoS = struct {
             self.*.tot_pkts = 0;
             self.distinct.clearRetainingCapacity();
             self.reduce.clearRetainingCapacity();
-            self.common.advance_epoch();
+            self.common.advance_epoch(pkt.time);
         }
 
         if (!self.distinct.contains(.{ key.saddr, key.daddr })) {
