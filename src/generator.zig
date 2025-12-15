@@ -376,8 +376,9 @@ fn generate_bursts(
             var in_pkt_idx: u32 = 0;
             for (synth_bursts) |burst| {
                 var packets = try std.ArrayList(time.Packet).initCapacity(allocator, burst.pkts);
+                const num_pkts_f = @as(f64, @floatFromInt(burst.pkts));
 
-                for (0..burst.pkts) |_| {
+                for (0..burst.pkts) |i| {
                     if (in_burst_idx >= in_bursts.len) {
                         std.debug.print("pkts = {}, in_bursts.len = {}, num_pkts = {}\n", .{
                             pkts,
@@ -392,12 +393,14 @@ fn generate_bursts(
                         in_pkt_idx = 0;
                         in_burst_idx += 1;
                     }
-                    pkt.time = burst.start_time + rand.*.float(f64) * (burst.end_time - burst.start_time);
+                    // pkt.time = burst.start_time + rand.*.float(f64) * (burst.end_time - burst.start_time);
+                    const i_f = @as(f64, @floatFromInt(i));
+                    pkt.time = burst.start_time + (i_f / num_pkts_f) * (burst.end_time - burst.start_time);
                     try packets.append(pkt);
                 }
 
                 // Sort packets in burst
-                std.mem.sort(time.Packet, packets.items, {}, time.Packet.lessThan);
+                // std.mem.sort(time.Packet, packets.items, {}, time.Packet.lessThan);
 
                 // Take burst start and end from packet timestamps
                 const start_time = packets.items[0].time;
