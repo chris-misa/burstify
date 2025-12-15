@@ -103,6 +103,7 @@ pub const BurstGenerator = struct {
 
         // Alternative distribution algorithm:
         // for 0..num_pkts select a burst weighted by burst duration, add one to that burst
+
         const props = try self.allocator.alloc(f64, temp_bursts.items.len);
         defer self.allocator.free(props);
 
