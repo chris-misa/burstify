@@ -16,6 +16,15 @@ pub const Packet = struct {
     proto: u8,
     len: u16,
     tcpflags: u8,
+
+    pub fn lessThan(
+        context: void,
+        l: Packet,
+        r: Packet,
+    ) bool {
+        _ = context;
+        return l.time < r.time;
+    }
 };
 
 pub const Burst = struct {

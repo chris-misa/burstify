@@ -46,6 +46,7 @@ const Burst = struct {
     }
 };
 
+// Pop returns smallest start_time first.
 const BurstQueue = std.PriorityQueue(Burst, void, Burst.compare);
 
 ///
@@ -78,17 +79,29 @@ pub const Generator = struct {
         time_params: conf.TimeParameters,
         addr_params: conf.AddrParameters,
     ) (error{OutOfMemory} || addr.AddrAnalyzerError)!Generator {
-        const src_map = try get_addr_map(allocator, rand, &flows.flows, struct {
-            fn f(k: time.FlowKey) u32 {
-                return k.saddr;
-            }
-        }.f, addr_params.src_sigma);
+        const src_map = try get_addr_map(
+            allocator,
+            rand,
+            &flows.flows,
+            struct {
+                fn f(k: time.FlowKey) u32 {
+                    return k.saddr;
+                }
+            }.f,
+            addr_params.src_sigma,
+        );
 
-        const dst_map = try get_addr_map(allocator, rand, &flows.flows, struct {
-            fn f(k: time.FlowKey) u32 {
-                return k.daddr;
-            }
-        }.f, addr_params.dst_sigma);
+        const dst_map = try get_addr_map(
+            allocator,
+            rand,
+            &flows.flows,
+            struct {
+                fn f(k: time.FlowKey) u32 {
+                    return k.daddr;
+                }
+            }.f,
+            addr_params.dst_sigma,
+        );
 
         var bursts: BurstQueue = try generate_bursts(allocator, rand, src_map, dst_map, &flows.flows, time_params);
         var active_bursts = BurstQueue.init(allocator, {});
@@ -127,6 +140,8 @@ pub const Generator = struct {
     }
 
     pub fn nextPacket(self: *Generator) error{OutOfMemory}!?struct { time.FlowKey, time.Packet } {
+
+        // Get active burst from which this packet should come
         var next_active = blk: {
             if (self.active_bursts.peek()) |active| {
                 if (self.bursts.peek()) |next| {
@@ -148,7 +163,8 @@ pub const Generator = struct {
             }
         };
 
-        // Extract the packet
+        // Extract the key and packet packet
+        const key = next_active.key;
         const pkt = next_active.packets.items[next_active.cur_pkt_idx];
 
         // Advance the burst's pointer
@@ -161,7 +177,7 @@ pub const Generator = struct {
         } else {
             next_active.deinit();
         }
-        return .{ next_active.key, pkt };
+        return .{ key, pkt };
     }
 };
 
@@ -310,9 +326,13 @@ fn generate_bursts(
                     }
                     // const i_f = @as(f64, @floatFromInt(i));
                     pkt.time = burst.start_time + rand.*.float(f64) * (burst.end_time - burst.start_time);
+
                     // pkt.time = burst.start_time + i_f * (burst.end_time - burst.start_time) / num_pkts_f; // Distribute packets uniformly over burst duration
                     try packets.append(pkt);
                 }
+
+                // Sort packets in burst
+                std.mem.sort(time.Packet, packets.items, {}, time.Packet.lessThan);
 
                 if (packets.items.len != burst.pkts) {
                     std.debug.print("packets.items.len = {d}, burst.pkts = {d}\n", .{ packets.items.len, burst.pkts });
