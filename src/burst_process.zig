@@ -52,10 +52,11 @@ pub const BurstGenerator = struct {
     pub fn next(self: *BurstGenerator, num_pkts: u32) error{OutOfMemory}![]BurstTimes {
         if (self.first_time) {
             // Make sure first start_offset < total_duration
-            self.start_offset = while (true) {
-                const res = pareto(self.conf.a_off, self.conf.m_off, self.rand);
-                if (res < self.conf.total_duration) break res;
-            } else unreachable;
+            // self.start_offset = while (true) {
+            //     const res = pareto(self.conf.a_off, self.conf.m_off, self.rand);
+            //     if (res < self.conf.total_duration) break res;
+            // } else unreachable;
+            self.start_offset = @mod(pareto(self.conf.a_off, self.conf.m_off, self.rand), self.conf.total_duration);
             self.first_time = false;
         }
 
