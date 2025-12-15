@@ -164,7 +164,7 @@ const QueryCommon = struct {
     /// Advances the epoch by self.epoch_duration
     ///
     pub fn advance_epoch(self: *QueryCommon, cur_time: f64) void {
-        while (self.next_epoch.? < cur_time) {
+        while (cur_time > self.next_epoch.?) {
             self.next_epoch = self.next_epoch.? + self.epoch_duration;
         }
     }

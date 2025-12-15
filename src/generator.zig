@@ -330,21 +330,24 @@ fn generate_bursts(
                     // pkt.time = burst.start_time + i_f * (burst.end_time - burst.start_time) / num_pkts_f; // Distribute packets uniformly over burst duration
                     try packets.append(pkt);
                 }
-
-                // Sort packets in burst
-                std.mem.sort(time.Packet, packets.items, {}, time.Packet.lessThan);
-
                 if (packets.items.len != burst.pkts) {
                     std.debug.print("packets.items.len = {d}, burst.pkts = {d}\n", .{ packets.items.len, burst.pkts });
                     @panic("This shouldn't happen");
                 }
+
+                // Sort packets in burst
+                std.mem.sort(time.Packet, packets.items, {}, time.Packet.lessThan);
+
+                // Take burst start and end from packet timestamps
+                const start_time = packets.items[0].time;
+                const end_time = packets.items[packets.items.len - 1].time;
 
                 const key = time.FlowKey{
                     .saddr = src_map.get(input_key.saddr) orelse @panic("source address not in AddrMap!"),
                     .daddr = dst_map.get(input_key.daddr) orelse @panic("destination address not in AddrMap!"),
                 };
 
-                const new_burst = Burst.init(key, burst.start_time, burst.end_time, packets);
+                const new_burst = Burst.init(key, start_time, end_time, packets);
                 try bursts.add(new_burst);
             }
         }
