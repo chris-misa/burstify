@@ -341,8 +341,12 @@ fn generate_bursts(
 
     for (0..num_flows) |i| {
         const key = flow_keys[i].@"0";
+        const in_flow_start = flow_keys[i].@"1";
         const in_bursts = flows.get(key).?.items;
         const out_flow_start = flow_starts[i];
+
+        const flow_start = in_flow_start;
+        _ = out_flow_start;
 
         var pkts: usize = 0;
         for (in_bursts) |burst| {
@@ -352,7 +356,7 @@ fn generate_bursts(
         if (pkts == 1) {
             var packets = try std.ArrayList(time.Packet).initCapacity(allocator, 1);
             var pkt = in_bursts[0].packets.items[0];
-            pkt.time = out_flow_start;
+            pkt.time = flow_start;
             try packets.append(pkt);
 
             const out_key = time.FlowKey{
@@ -367,7 +371,7 @@ fn generate_bursts(
                 allocator,
                 rand,
                 time_params,
-                out_flow_start,
+                flow_start,
                 @intCast(pkts),
             );
             defer allocator.free(synth_bursts);
