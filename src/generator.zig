@@ -324,19 +324,17 @@ fn generate_bursts(
             i += 1;
         }
     }
-    // Actually just shuffle them...
-    rand.*.shuffle(struct { time.FlowKey, f64 }, flow_keys);
-    // std.mem.sort(
-    //     struct { time.FlowKey, f64 },
-    //     flow_keys,
-    //     {},
-    //     struct {
-    //         pub fn lt(context: void, l: struct { time.FlowKey, f64 }, r: struct { time.FlowKey, f64 }) bool {
-    //             _ = context;
-    //             return l.@"1" < r.@"1";
-    //         }
-    //     }.lt,
-    // );
+    std.mem.sort(
+        struct { time.FlowKey, f64 },
+        flow_keys,
+        {},
+        struct {
+            pub fn lt(context: void, l: struct { time.FlowKey, f64 }, r: struct { time.FlowKey, f64 }) bool {
+                _ = context;
+                return l.@"1" < r.@"1";
+            }
+        }.lt,
+    );
 
     // Generate burst processes for each flow
     var bursts = BurstQueue.init(allocator, {});
