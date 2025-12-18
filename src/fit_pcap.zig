@@ -50,10 +50,17 @@ pub fn main() !void {
 
     std.debug.print("Fitting...\n", .{});
 
-    const on_alpha, const off_alpha = try flows.pareto_fit();
+    const on_params, const off_params = try flows.pareto_fit();
+    const on_alpha, const on_m = on_params;
+    const off_alpha, const off_m = off_params;
     const srcs_sigma = try srcs.logit_normal_fit();
     const dsts_sigma = try dsts.logit_normal_fit();
 
-    std.debug.print("alpha_on = {d}, alpha_off = {d}\n", .{ on_alpha, off_alpha });
+    std.debug.print("alpha_on = {d}, m_on = {d}; alpha_off = {d}, m_off = {d}\n", .{
+        on_alpha,
+        on_m,
+        off_alpha,
+        off_m,
+    });
     std.debug.print("sigma_srcs = {d}, sigma_dsts = {d}\n", .{ srcs_sigma, dsts_sigma });
 }

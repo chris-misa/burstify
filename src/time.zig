@@ -110,45 +110,54 @@ pub const TimeAnalyzer = struct {
     }
 
     ///
-    /// Fits the burst on and off times (separately) over all flows to Pareto distributions using MLE:
-    /// alpha = n / (sum_i ln(x_i / x_min)).
+    /// Fits the burst on and off times (separately) over all flows to Pareto distributions using MLE.
     ///
     /// Returns the estimated shape parameter for on and off distributions respectively.
     ///
-    pub fn pareto_fit(self: TimeAnalyzer) error{OutOfMemory}!struct { f64, f64 } {
+    pub fn pareto_fit(self: TimeAnalyzer) error{OutOfMemory}!struct { struct { f64, f64 }, struct { f64, f64 } } {
         const a_on = a_on_blk: {
             const on_durs = try self.get_on_durations();
             defer on_durs.deinit();
 
-            var n: f64 = 0;
-            var m: f64 = 0;
-            for (on_durs.items) |dur| {
-                if (dur >= self.burst_timeout) {
-                    n += 1.0;
-                    const x = @log(dur / self.burst_timeout);
-                    m += (x - m) / n;
-                }
-            }
-            break :a_on_blk (1.0 / m);
+            break :a_on_blk fit_one(on_durs);
         };
 
         const a_off = a_off_blk: {
             const off_durs = try self.get_off_durations();
             defer off_durs.deinit();
 
-            var n: f64 = 0;
-            var m: f64 = 0;
-            for (off_durs.items) |dur| {
-                if (dur >= self.burst_timeout) {
-                    n += 1.0;
-                    const x = @log(dur / self.burst_timeout);
-                    m += (x - m) / n;
-                }
-            }
-            break :a_off_blk (1.0 / m);
+            break :a_off_blk fit_one(off_durs);
         };
 
         return .{ a_on, a_off };
+    }
+
+    ///
+    /// Estimate alpha and x_min using MLE for given list of observations
+    ///
+    /// alpha_MLE = n / (sum_i ln(x_i / x_min)) = 1 / ((1/n) * sum_i ln(x_i) - ln(x_min)) = 1 / (mean_i { ln(x_i) } - ln(x_min))
+    ///
+    /// So we can use the mean part of Welford's algorithm to avoid numeric accuracy issues.
+    ///
+    pub fn fit_one(xs: std.ArrayList(f64)) struct { f64, f64 } {
+        var x_min: f64 = 10000.0;
+        for (xs.items) |x| {
+            if (x > 0 and x < x_min) {
+                x_min = x;
+            }
+        }
+
+        var n: f64 = 0;
+        var m: f64 = 0;
+        for (xs.items) |x| {
+            if (x > 0) {
+                n += 1.0;
+                m += (@log(x) - m) / n;
+            }
+        }
+        const alpha = 1.0 / (m - @log(x_min));
+
+        return .{ alpha, x_min };
     }
 
     ///
