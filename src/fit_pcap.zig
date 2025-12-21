@@ -13,12 +13,13 @@ const conf = @import("config.zig");
 const util = @import("util.zig");
 
 pub fn main() !void {
-    if (std.os.argv.len != 2 and std.os.argv.len != 3) {
-        std.debug.print("Usage: {s} <pcap file> [<on/off times output file>]\n", .{std.os.argv[0]});
+    if (std.os.argv.len != 2 and std.os.argv.len != 4) {
+        std.debug.print("Usage: {s} <pcap file> [<on/off times output file> <flow size output file>]\n", .{std.os.argv[0]});
         std.process.exit(0);
     }
     const filepath = std.mem.span(std.os.argv[1]);
-    const bursts_outfile = if (std.os.argv.len == 3) std.mem.span(std.os.argv[2]) else null;
+    const bursts_outfile = if (std.os.argv.len == 4) std.mem.span(std.os.argv[2]) else null;
+    const flow_size_outfile = if (std.os.argv.len == 4) std.mem.span(std.os.argv[3]) else null;
 
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
@@ -53,6 +54,25 @@ pub fn main() !void {
         }
     }
 
+    if (flow_size_outfile) |outfile_name| {
+        std.debug.print("Writing flow sizes to {s}\n", .{outfile_name});
+        const outfile = try std.fs.cwd().createFile(outfile_name, .{});
+        defer outfile.close();
+        const out = outfile.writer();
+        try out.print("start_time,end_time,pkts\n", .{});
+        var it = flows.flows.valueIterator();
+        while (it.next()) |bursts| {
+            var pkts: usize = 0;
+            for (bursts.items) |burst| {
+                pkts += burst.packets.items.len;
+            }
+            const start_time = bursts.items[0].start_time;
+            const end_time = bursts.items[bursts.items.len - 1].end_time;
+
+            try out.print("{d},{d},{d}\n", .{ start_time, end_time, pkts });
+        }
+    }
+
     var srcs: addr.AddrAnalyzer = try addr.AddrAnalyzer.init(allocator);
     defer srcs.deinit();
     var dsts: addr.AddrAnalyzer = try addr.AddrAnalyzer.init(allocator);
@@ -69,17 +89,20 @@ pub fn main() !void {
 
     std.debug.print("Fitting...\n", .{});
 
-    const on_params, const off_params = try flows.pareto_fit();
+    const on_params, const off_params, const pkts_params = try flows.pareto_fit();
     const on_alpha, const on_m = on_params;
     const off_alpha, const off_m = off_params;
+    const pkts_alpha, const pkts_m = pkts_params;
     const srcs_sigma = try srcs.logit_normal_fit();
     const dsts_sigma = try dsts.logit_normal_fit();
 
-    std.debug.print("alpha_on = {d}, m_on = {d}; alpha_off = {d}, m_off = {d}\n", .{
+    std.debug.print("alpha_on = {d}, m_on = {d};\nalpha_off = {d}, m_off = {d};\nalpha_pkts = {d}, m_pkts = {d}\n", .{
         on_alpha,
         on_m,
         off_alpha,
         off_m,
+        pkts_alpha,
+        pkts_m,
     });
     std.debug.print("sigma_srcs = {d}, sigma_dsts = {d}\n", .{ srcs_sigma, dsts_sigma });
 }

@@ -114,7 +114,7 @@ pub const TimeAnalyzer = struct {
     ///
     /// Returns the estimated shape parameter for on and off distributions respectively.
     ///
-    pub fn pareto_fit(self: TimeAnalyzer) error{OutOfMemory}!struct { struct { f64, f64 }, struct { f64, f64 } } {
+    pub fn pareto_fit(self: TimeAnalyzer) error{OutOfMemory}!struct { struct { f64, f64 }, struct { f64, f64 }, struct { f64, f64 } } {
         const a_on = a_on_blk: {
             const on_durs = try self.get_on_durations();
             defer on_durs.deinit();
@@ -129,7 +129,14 @@ pub const TimeAnalyzer = struct {
             break :a_off_blk fit_one(off_durs, self.burst_timeout);
         };
 
-        return .{ a_on, a_off };
+        const a_pkts = blk: {
+            const flow_sizes = try self.get_flow_sizes();
+            defer flow_sizes.deinit();
+
+            break :blk fit_one(flow_sizes, 1.0);
+        };
+
+        return .{ a_on, a_off, a_pkts };
     }
 
     ///
@@ -192,7 +199,7 @@ pub const TimeAnalyzer = struct {
     }
 
     ///
-    /// Return a ArrayList of off-durations
+    /// Return an ArrayList of off-durations
     /// Caller is responsible for calling ArrayList.deinit()
     ///
     pub fn get_off_durations(self: TimeAnalyzer) error{OutOfMemory}!std.ArrayList(f64) {
@@ -203,6 +210,22 @@ pub const TimeAnalyzer = struct {
                 const dt = bursts.items[i + 1].start_time - bursts.items[i].end_time;
                 try res.append(dt);
             }
+        }
+        return res;
+    }
+
+    ///
+    /// Returns an ArrayList of number of packets in each flow
+    ///
+    pub fn get_flow_sizes(self: TimeAnalyzer) error{OutOfMemory}!std.ArrayList(f64) {
+        var res = std.ArrayList(f64).init(self.allocator);
+        var it = self.flows.valueIterator();
+        while (it.next()) |bursts| {
+            var pkts: usize = 0;
+            for (bursts.items) |burst| {
+                pkts += burst.packets.items.len;
+            }
+            try res.append(@as(f64, @floatFromInt(pkts)));
         }
         return res;
     }
