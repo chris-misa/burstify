@@ -13,11 +13,12 @@ const conf = @import("config.zig");
 const util = @import("util.zig");
 
 pub fn main() !void {
-    if (std.os.argv.len != 2) {
-        std.debug.print("Usage: {s} <pcap file>\n", .{std.os.argv[0]});
+    if (std.os.argv.len != 2 and std.os.argv.len != 3) {
+        std.debug.print("Usage: {s} <pcap file> [<on/off times output file>]\n", .{std.os.argv[0]});
         std.process.exit(0);
     }
     const filepath = std.mem.span(std.os.argv[1]);
+    const bursts_outfile = if (std.os.argv.len == 3) std.mem.span(std.os.argv[2]) else null;
 
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
@@ -33,6 +34,24 @@ pub fn main() !void {
     defer flows.deinit();
 
     std.debug.print("Read {d} flows\n", .{flows.flows.count()});
+
+    if (bursts_outfile) |outfile_name| {
+        std.debug.print("Writing on/off times to {s}\n", .{outfile_name});
+        const outfile = try std.fs.cwd().createFile(outfile_name, .{});
+        defer outfile.close();
+        const out = outfile.writer();
+        try out.print("type,duration\n", .{});
+
+        const on_durs = try flows.get_on_durations();
+        for (on_durs.items) |dur| {
+            try out.print("on,{d}\n", .{dur});
+        }
+
+        const off_durs = try flows.get_off_durations();
+        for (off_durs.items) |dur| {
+            try out.print("off,{d}\n", .{dur});
+        }
+    }
 
     var srcs: addr.AddrAnalyzer = try addr.AddrAnalyzer.init(allocator);
     defer srcs.deinit();

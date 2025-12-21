@@ -119,14 +119,14 @@ pub const TimeAnalyzer = struct {
             const on_durs = try self.get_on_durations();
             defer on_durs.deinit();
 
-            break :a_on_blk fit_one(on_durs);
+            break :a_on_blk fit_one(on_durs, self.burst_timeout);
         };
 
         const a_off = a_off_blk: {
             const off_durs = try self.get_off_durations();
             defer off_durs.deinit();
 
-            break :a_off_blk fit_one(off_durs);
+            break :a_off_blk fit_one(off_durs, self.burst_timeout);
         };
 
         return .{ a_on, a_off };
@@ -135,27 +135,43 @@ pub const TimeAnalyzer = struct {
     ///
     /// Estimate alpha and x_min using MLE for given list of observations
     ///
+    /// TODO: probably the MLE is not the best / most robust method here. Switch to something else? MoM won't work cause second moment is infinite. Just use slope of log-log plot?
+    /// Slope is -(alpha + 1)
+    ///
     /// alpha_MLE = n / (sum_i ln(x_i / x_min)) = 1 / ((1/n) * sum_i ln(x_i) - ln(x_min)) = 1 / (mean_i { ln(x_i) } - ln(x_min))
     ///
     /// So we can use the mean part of Welford's algorithm to avoid numeric accuracy issues.
     ///
-    pub fn fit_one(xs: std.ArrayList(f64)) struct { f64, f64 } {
-        var x_min: f64 = 10000.0;
-        for (xs.items) |x| {
-            if (x > 0 and x < x_min) {
-                x_min = x;
-            }
-        }
+    pub fn fit_one(xs: std.ArrayList(f64), x_min: f64) struct { f64, f64 } {
+        // var x_min: f64 = 10000.0;
+        // for (xs.items) |x| {
+        //     if (x > 0 and x < x_min) {
+        //         x_min = x;
+        //     }
+        // }
 
-        var n: f64 = 0;
-        var m: f64 = 0;
-        for (xs.items) |x| {
-            if (x > 0) {
-                n += 1.0;
-                m += (@log(x) - m) / n;
+        const sum_ln, const n = blk: {
+            var s: f64 = 0.0;
+            var n: f64 = 0.0;
+            for (xs.items) |x| {
+                if (x >= x_min) {
+                    s += @log(x / x_min);
+                    n += 1.0;
+                }
             }
-        }
-        const alpha = 1.0 / (m - @log(x_min));
+            break :blk .{ s, n };
+        };
+        const alpha = n / sum_ln;
+
+        // var n: f64 = 0;
+        // var m: f64 = 0;
+        // for (xs.items) |x| {
+        //     if (x > 0) {
+        //         n += 1.0;
+        //         m += (@log(x) - m) / n;
+        //     }
+        // }
+        // const alpha = 1.0 / (m - @log(x_min));
 
         return .{ alpha, x_min };
     }
