@@ -59,6 +59,8 @@ pub const FlowMap = std.AutoHashMap(FlowKey, std.ArrayList(Burst));
 pub const TimeAnalyzer = struct {
     flows: FlowMap,
     burst_timeout: f64,
+    first_time: ?f64,
+    max_time: f64,
     allocator: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator, burst_timeout_sec: f64) error{OutOfMemory}!TimeAnalyzer {
@@ -66,6 +68,8 @@ pub const TimeAnalyzer = struct {
         return TimeAnalyzer{
             .flows = flows,
             .burst_timeout = burst_timeout_sec,
+            .first_time = null,
+            .max_time = 0.0,
             .allocator = allocator,
         };
     }
@@ -81,11 +85,21 @@ pub const TimeAnalyzer = struct {
         self.flows.deinit();
     }
 
+    pub fn get_duration(self: TimeAnalyzer) f64 {
+        return self.max_time - self.first_time.?;
+    }
+
     ///
     /// Add a packet with the given key and auxiliary fields.
     ///
     pub fn addPkt(self: *TimeAnalyzer, key: FlowKey, pkt: Packet) error{OutOfMemory}!void {
         const time = pkt.time;
+        if (self.first_time == null) {
+            self.first_time = time;
+        }
+        if (time > self.max_time) {
+            self.max_time = time;
+        }
         if (self.flows.getPtr(key)) |*bursts| {
             // Previously-observed key
             var burst: *Burst = &bursts.*.items[bursts.*.items.len - 1];

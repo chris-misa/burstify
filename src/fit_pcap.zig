@@ -36,6 +36,7 @@ pub fn main() !void {
 
     std.debug.print("Read {d} flows\n", .{flows.flows.count()});
 
+    // Output bursts
     if (bursts_outfile) |outfile_name| {
         std.debug.print("Writing on/off times to {s}\n", .{outfile_name});
         const outfile = try std.fs.cwd().createFile(outfile_name, .{});
@@ -54,6 +55,7 @@ pub fn main() !void {
         }
     }
 
+    // Output flow sizes
     if (flow_size_outfile) |outfile_name| {
         std.debug.print("Writing flow sizes to {s}\n", .{outfile_name});
         const outfile = try std.fs.cwd().createFile(outfile_name, .{});
@@ -73,6 +75,18 @@ pub fn main() !void {
         }
     }
 
+    // Analyze flow arrival process
+    const n_flows: f64 = @as(f64, @floatFromInt(flows.flows.count()));
+    const max_dur: f64 = flows.get_duration();
+    const flow_rate = n_flows / max_dur;
+
+    std.debug.print("Number of flows = {d}, max_dur = {d}, mean flow rate = {d}\n", .{
+        n_flows,
+        max_dur,
+        flow_rate,
+    });
+
+    // Analyze addresses
     var srcs: addr.AddrAnalyzer = try addr.AddrAnalyzer.init(allocator);
     defer srcs.deinit();
     var dsts: addr.AddrAnalyzer = try addr.AddrAnalyzer.init(allocator);
@@ -89,6 +103,7 @@ pub fn main() !void {
 
     std.debug.print("Fitting...\n", .{});
 
+    // Analyze inter-arrival times
     const on_params, const off_params, const pkts_params = try flows.pareto_fit();
     const on_alpha, const on_m = on_params;
     const off_alpha, const off_m = off_params;
