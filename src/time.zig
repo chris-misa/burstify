@@ -144,10 +144,10 @@ pub const TimeAnalyzer = struct {
         };
 
         const a_pkts = blk: {
-            const flow_sizes = try self.get_flow_sizes();
-            defer flow_sizes.deinit();
+            const burst_sizes = try self.get_burst_sizes();
+            defer burst_sizes.deinit();
 
-            break :blk try sols_fit_one(self.allocator, flow_sizes, 1.0);
+            break :blk try sols_fit_one(self.allocator, burst_sizes, 1.0);
         };
 
         return .{ a_on, a_off, a_pkts };
@@ -339,18 +339,15 @@ pub const TimeAnalyzer = struct {
     }
 
     ///
-    /// Returns an ArrayList of number of packets in each flow
+    /// Returns an ArrayList of number of packets in each burst
     ///
-    pub fn get_flow_sizes(self: TimeAnalyzer) error{OutOfMemory}!std.ArrayList(f64) {
+    pub fn get_burst_sizes(self: TimeAnalyzer) error{OutOfMemory}!std.ArrayList(f64) {
         var res = std.ArrayList(f64).init(self.allocator);
         var it = self.flows.valueIterator();
         while (it.next()) |bursts| {
-            // var pkts: usize = 0;
             for (bursts.items) |burst| {
-                // pkts += burst.packets.items.len;
                 try res.append(@as(f64, @floatFromInt(burst.packets.items.len)));
             }
-            // try res.append(@as(f64, @floatFromInt(pkts)));
         }
         return res;
     }
