@@ -133,31 +133,141 @@ pub const TimeAnalyzer = struct {
             const on_durs = try self.get_on_durations();
             defer on_durs.deinit();
 
-            break :a_on_blk fit_one(on_durs, self.burst_timeout);
+            break :a_on_blk try sols_fit_one(self.allocator, on_durs, self.burst_timeout);
         };
 
         const a_off = a_off_blk: {
             const off_durs = try self.get_off_durations();
             defer off_durs.deinit();
 
-            break :a_off_blk fit_one(off_durs, self.burst_timeout);
+            break :a_off_blk try sols_fit_one(self.allocator, off_durs, self.burst_timeout);
         };
 
         const a_pkts = blk: {
             const flow_sizes = try self.get_flow_sizes();
             defer flow_sizes.deinit();
 
-            break :blk fit_one(flow_sizes, 1.0);
+            break :blk try sols_fit_one(self.allocator, flow_sizes, 1.0);
         };
 
         return .{ a_on, a_off, a_pkts };
+    }
+
+    pub fn ols_fit_one(
+        allocator: std.mem.Allocator,
+        xs_raw: std.ArrayList(f64),
+        x_min: f64,
+    ) error{OutOfMemory}!struct { f64, f64 } {
+        // _ = x_min;
+        var xs = std.ArrayList(f64).init(allocator);
+        defer xs.deinit();
+        for (xs_raw.items) |x| {
+            if (x >= x_min) {
+                // if (x > 0.0) {
+                try xs.append(x);
+            }
+        }
+
+        const n = @as(f64, @floatFromInt(xs.items.len));
+
+        const comp = struct {
+            fn gt(_: void, l: f64, r: f64) bool {
+                return l > r;
+            }
+        }.gt;
+        std.mem.sort(f64, xs.items, {}, comp);
+        const x_m = xs.items[xs.items.len - 1];
+        const s1 = blk: {
+            var acc: f64 = 0.0;
+            for (1..xs.items.len) |i| {
+                acc += @log(@as(f64, @floatFromInt(i)) / n) * @log(x_m / xs.items[i - 1]);
+            }
+            break :blk acc;
+        };
+
+        const s2 = blk: {
+            var acc: f64 = 0.0;
+            for (1..xs.items.len) |i| {
+                acc += std.math.pow(f64, @log(@as(f64, @floatFromInt(i)) / n), 2.0);
+            }
+            break :blk acc;
+        };
+
+        const alpha = s2 / s1;
+
+        return .{ alpha, x_m };
+    }
+
+    pub fn sols_fit_one(
+        allocator: std.mem.Allocator,
+        xs_raw: std.ArrayList(f64),
+        x_min: f64,
+    ) error{OutOfMemory}!struct { f64, f64 } {
+        // _ = x_min;
+        var xs = std.ArrayList(f64).init(allocator);
+        defer xs.deinit();
+        for (xs_raw.items) |x| {
+            if (x >= x_min) {
+                // if (x > 0.0) {
+                try xs.append(x);
+            }
+        }
+
+        const n = @as(f64, @floatFromInt(xs.items.len));
+
+        const s1 = blk: {
+            var acc: f64 = 0.0;
+            for (1..xs.items.len) |i| {
+                acc += @log(@as(f64, @floatFromInt(i)) / n);
+            }
+            break :blk acc;
+        };
+
+        const s2 = blk: {
+            var acc: f64 = 0.0;
+            for (1..xs.items.len + 1) |j| {
+                const s2_1 = blk2: {
+                    var acc2: f64 = 0.0;
+                    for (1..j + 1) |i| {
+                        acc2 += @log(@as(f64, @floatFromInt(i)) / n);
+                    }
+                    break :blk2 acc2;
+                };
+                acc += s2_1 / @as(f64, @floatFromInt(j));
+            }
+            break :blk acc;
+        };
+
+        const comp = struct {
+            fn gt(_: void, l: f64, r: f64) bool {
+                return l > r;
+            }
+        }.gt;
+
+        std.mem.sort(f64, xs.items, {}, comp);
+
+        const x_m = xs.items[xs.items.len - 1];
+        const s3 = blk: {
+            var acc: f64 = 0.0;
+            for (1..xs.items.len) |i| {
+                acc += @log(@as(f64, @floatFromInt(i)) / n) * @log(x_m / xs.items[i - 1]);
+            }
+            break :blk acc;
+        };
+
+        const alpha = ((s1 / n) - s2) / s3;
+
+        return .{ alpha, x_m };
     }
 
     ///
     /// Estimate alpha and x_min using MLE for given list of observations
     ///
     /// TODO: probably the MLE is not the best / most robust method here. Switch to something else? MoM won't work cause second moment is infinite. Just use slope of log-log plot?
-    /// Slope is -(alpha + 1)
+    /// Slope is -(alpha + 1) (or actually just -alpha?)
+    ///
+    ///
+    /// TODO: Seems like the OLS (ordinary least-squares) method from the rpackage ParetoPosStable works best compared to log-log plots of the data....
     ///
     /// alpha_MLE = n / (sum_i ln(x_i / x_min)) = 1 / ((1/n) * sum_i ln(x_i) - ln(x_min)) = 1 / (mean_i { ln(x_i) } - ln(x_min))
     ///
@@ -235,11 +345,12 @@ pub const TimeAnalyzer = struct {
         var res = std.ArrayList(f64).init(self.allocator);
         var it = self.flows.valueIterator();
         while (it.next()) |bursts| {
-            var pkts: usize = 0;
+            // var pkts: usize = 0;
             for (bursts.items) |burst| {
-                pkts += burst.packets.items.len;
+                // pkts += burst.packets.items.len;
+                try res.append(@as(f64, @floatFromInt(burst.packets.items.len)));
             }
-            try res.append(@as(f64, @floatFromInt(pkts)));
+            // try res.append(@as(f64, @floatFromInt(pkts)));
         }
         return res;
     }

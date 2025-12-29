@@ -14,7 +14,7 @@ const util = @import("util.zig");
 
 pub fn main() !void {
     if (std.os.argv.len != 2 and std.os.argv.len != 4) {
-        std.debug.print("Usage: {s} <pcap file> [<on/off times output file> <flow size output file>]\n", .{std.os.argv[0]});
+        std.debug.print("Usage: {s} <pcap file> [<on/off times output file> <burst size output file>]\n", .{std.os.argv[0]});
         std.process.exit(0);
     }
     const filepath = std.mem.span(std.os.argv[1]);
@@ -57,21 +57,16 @@ pub fn main() !void {
 
     // Output flow sizes
     if (flow_size_outfile) |outfile_name| {
-        std.debug.print("Writing flow sizes to {s}\n", .{outfile_name});
+        std.debug.print("Writing burst sizes to {s}\n", .{outfile_name});
         const outfile = try std.fs.cwd().createFile(outfile_name, .{});
         defer outfile.close();
         const out = outfile.writer();
         try out.print("start_time,end_time,pkts\n", .{});
         var it = flows.flows.valueIterator();
         while (it.next()) |bursts| {
-            var pkts: usize = 0;
             for (bursts.items) |burst| {
-                pkts += burst.packets.items.len;
+                try out.print("{d},{d},{d}\n", .{ burst.start_time, burst.end_time, burst.packets.items.len });
             }
-            const start_time = bursts.items[0].start_time;
-            const end_time = bursts.items[bursts.items.len - 1].end_time;
-
-            try out.print("{d},{d},{d}\n", .{ start_time, end_time, pkts });
         }
     }
 
