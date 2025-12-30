@@ -292,6 +292,32 @@ fn generate_bursts(
     flows: *const time.FlowMap,
     time_params: conf.TimeParameters,
 ) error{OutOfMemory}!BurstQueue {
+    // Generate flow start times based on Poisson process
+    // For each flow start, generate bursts based on on/off process
+    _ = allocator;
+    _ = src_map;
+    _ = dst_map;
+    _ = flows;
+
+    var flow_start: f64 = 0.0;
+    while (flow_start < time_params.total_duration) {
+        flow_start += rand.*.floatExp(f64) / time_params.flow_rate;
+
+        const cur: f64 = flow_start;
+        _ = cur;
+        // TODO: select a random flow key (based on flow size???)
+        // generate all bursts for this flow...
+    }
+}
+
+fn generate_bursts_OLD(
+    allocator: std.mem.Allocator,
+    rand: *std.Random,
+    src_map: addr.AddrMap,
+    dst_map: addr.AddrMap,
+    flows: *const time.FlowMap,
+    time_params: conf.TimeParameters,
+) error{OutOfMemory}!BurstQueue {
 
     // Generate flow arrival process
     const num_flows = flows.count();
@@ -422,4 +448,34 @@ fn generate_bursts(
     }
 
     return bursts;
+}
+
+pub fn rank_choices(
+    allocator: std.mem.Allocator,
+    x: usize,
+    in_count: usize,
+    out_count: usize,
+) error{OutOfMemory}!std.ArrayList(struct { usize, f64 }) {
+    const x_f = @as(f64, @floatFromInt(x));
+    const in_count_f = @as(f64, @floatFromInt(in_count));
+    const out_count_f = @as(f64, @floatFromInt(out_count));
+    var i = @floor(x_f * (out_count_f / in_count_f));
+    var prev = x_f / in_count_f;
+    var res = std.ArrayList(struct { usize, f64 }).init(allocator);
+
+    while (i / out_count_f < (x_f + 1) / in_count_f) {
+        i += 1.0;
+
+        const next_end = if (i / out_count_f < (x_f + 1) / in_count_f) i / out_count_f else (x_f + 1) / in_count_f;
+        const p = (next_end - prev) / (1.0 / in_count_f);
+        try res.append(.{ @as(usize, @intFromFloat(i - 1.0)), p });
+        prev = next_end;
+    }
+
+    const p = ((x_f + 1) / in_count_f - prev) / ((x_f + 1) / in_count_f - x_f / in_count_f);
+    if (p > 0.0) {
+        try res.append(.{ @as(usize, @intFromFloat(i)), p });
+    }
+
+    return res;
 }
