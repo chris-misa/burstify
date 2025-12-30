@@ -281,6 +281,11 @@ fn burst_process(
     return bursts.toOwnedSlice();
 }
 
+pub const Flow = struct {
+    pkts: u32,
+    bursts: std.ArrayList(BurstTimes),
+};
+
 ///
 /// Generate synthetic bursts and collect in a BurstQueue
 ///
@@ -294,20 +299,52 @@ fn generate_bursts(
 ) error{OutOfMemory}!BurstQueue {
     // Generate flow start times based on Poisson process
     // For each flow start, generate bursts based on on/off process
-    _ = allocator;
     _ = src_map;
     _ = dst_map;
     _ = flows;
 
     var flow_start: f64 = 0.0;
+    var synth_flows = std.ArrayList(Flow).init(allocator);
+    defer {
+        for (synth_flows.items) |flow| {
+            flow.bursts.deinit();
+        }
+        synth_flows.deinit();
+    }
     while (flow_start < time_params.total_duration) {
         flow_start += rand.*.floatExp(f64) / time_params.flow_rate;
 
-        const cur: f64 = flow_start;
-        _ = cur;
-        // TODO: select a random flow key (based on flow size???)
-        // generate all bursts for this flow...
+        // generate all bursts for this flow.
+        var cur: f64 = flow_start;
+        var bursts = std.ArrayList(BurstTimes).init(allocator);
+        var flow_pkts: u32 = 0;
+        while (cur < time_params.total_duration) {
+            const on_dur = pareto(time_params.a_on, time_params.m_on, rand);
+            const off_dur = pareto(time_params.a_off, time_params.m_off, rand);
+            const pkts = @as(u32, @intFromFloat(pareto(time_params.a_pkts, time_params.m_pkts, rand)));
+            var burst = BurstTimes{
+                .start_time = cur,
+                .end_time = cur + on_dur,
+                .pkts = pkts,
+            };
+            if (burst.end_time > time_params.total_duration) {
+                burst.end_time = time_params.total_duration;
+            }
+            try bursts.append(burst);
+            cur += on_dur;
+            cur += off_dur;
+            flow_pkts += pkts;
+        }
+        const flow = Flow{
+            .pkts = flow_pkts,
+            .bursts = bursts,
+        };
+        try synth_flows.append(flow);
     }
+    // compute total flow sizes and select corresponding ground-truth flows to map packets from based on ranking.
+    // use weighted random based on rank_choices())
+
+    return BurstQueue.init(allocator, {});
 }
 
 fn generate_bursts_OLD(
