@@ -282,9 +282,25 @@ fn burst_process(
 }
 
 pub const Flow = struct {
+    key: time.FlowKey,
     pkts: u32,
     bursts: std.ArrayList(BurstTimes),
 };
+
+pub fn sort_flow_map(flows: *const time.FlowMap) std.ArrayList(Flow) {
+    var res = std.ArrayList(Flow);
+    var it = flows.iterator();
+    while (it.next()) |elem| {
+        const pkts = TBD;
+        const flow = Flow{
+            .key = elem.key_ptr.*,
+            .pkts = pkts,
+            .bursts = TBD,
+        };
+        // actually need a different structure to hold the gt flows with time.Packet records vs the  BurstTimes synth flows...
+        // ... or just produce a list of FlowKey, total_packets and use the flowkey to index into the original FlowMap?
+    }
+}
 
 ///
 /// Generate synthetic bursts and collect in a BurstQueue
@@ -336,6 +352,7 @@ fn generate_bursts(
             flow_pkts += pkts;
         }
         const flow = Flow{
+            .key = time.FlowKey{ 0, 0 },
             .pkts = flow_pkts,
             .bursts = bursts,
         };
