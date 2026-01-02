@@ -284,22 +284,36 @@ fn burst_process(
 pub const Flow = struct {
     key: time.FlowKey,
     pkts: u32,
-    bursts: std.ArrayList(BurstTimes),
+    bursts: ?std.ArrayList(BurstTimes),
 };
 
-pub fn sort_flow_map(flows: *const time.FlowMap) std.ArrayList(Flow) {
-    var res = std.ArrayList(Flow);
+///
+/// Extracts the flow keys and total packet counts from the given FlowMap
+/// Note: because it's not needed, this does not bother with extracting burst times for now...
+///
+pub fn extract_flow_map(
+    allocator: std.mem.Allocator,
+    flows: *const time.FlowMap,
+) error{OutOfMemory}!std.ArrayList(Flow) {
+    var res = std.ArrayList(Flow).init(allocator);
     var it = flows.iterator();
+
     while (it.next()) |elem| {
-        const pkts = TBD;
+        const pkts = blk: {
+            var n: u32 = 0;
+            for (elem.value_ptr.*.items) |burst| {
+                n += @intCast(burst.packets.items.len);
+            }
+            break :blk n;
+        };
         const flow = Flow{
             .key = elem.key_ptr.*,
             .pkts = pkts,
-            .bursts = TBD,
+            .bursts = null,
         };
-        // actually need a different structure to hold the gt flows with time.Packet records vs the  BurstTimes synth flows...
-        // ... or just produce a list of FlowKey, total_packets and use the flowkey to index into the original FlowMap?
+        try res.append(flow);
     }
+    return res;
 }
 
 ///
@@ -313,17 +327,13 @@ fn generate_bursts(
     flows: *const time.FlowMap,
     time_params: conf.TimeParameters,
 ) error{OutOfMemory}!BurstQueue {
-    // Generate flow start times based on Poisson process
-    // For each flow start, generate bursts based on on/off process
-    _ = src_map;
-    _ = dst_map;
-    _ = flows;
 
+    // Generate synthetic flows: start times based on Poisson process; bursts based on Pareto on/off process
     var flow_start: f64 = 0.0;
     var synth_flows = std.ArrayList(Flow).init(allocator);
     defer {
         for (synth_flows.items) |flow| {
-            flow.bursts.deinit();
+            flow.bursts.?.deinit();
         }
         synth_flows.deinit();
     }
@@ -358,8 +368,58 @@ fn generate_bursts(
         };
         try synth_flows.append(flow);
     }
-    // compute total flow sizes and select corresponding ground-truth flows to map packets from based on ranking.
-    // use weighted random based on rank_choices())
+
+    // Gather ground-truth flow sizes
+    const gt_flows = extract_flow_map(allocator, flows);
+    defer gt_flows.deinit();
+
+    // Sort both lists of flows
+    const flow_cmp = struct {
+        pub fn lt(c: void, l: Flow, r: Flow) bool {
+            _ = c;
+            return l.pkts < r.pkts;
+        }
+    }.lt;
+    std.mem.sort(Flow, synth_flows.items, {}, flow_cmp);
+    std.mem.sort(Flow, gt_flows.items, {}, flow_cmp);
+
+    // Create map from synth_flows to gt_flows based on probabilistic uniform alignment
+    const index_map = blk: {
+        var gt_idxs = std.ArrayList(usize).init(allocator);
+        for (0..synth_flows.items.len) |synth_idx| {
+            const target_idxs, const target_probs = rank_choices(allocator, synth_idx, synth_flows.items.len, gt_flows.items.len);
+            defer {
+                target_idxs.deinit();
+                target_probs.deinit();
+            }
+
+            const gt_idx = target_idxs.items[rand.weightedIndex(f64, target_probs.items)];
+            try gt_idxs.append(gt_idx);
+        }
+        break :blk gt_idxs;
+    };
+    defer index_map.deinit();
+
+    // Follow map to inject ground-truth flow keys and packets into synth_flows
+    for (synth_flows, index_map) |*synth_flow, gt_idx| {
+        const gt_flow = gt_flows.items[gt_idx];
+
+        // Map and inject flow key
+        synth_flow.*.key = time.FlowKey{
+            .saddr = src_map.get(gt_flow.key.saddr) orelse @panic("source address not in AddrMap!"),
+            .daddr = dst_map.get(gt_flow.key.daddr) orelse @panic("destination address not in AddrMap!"),
+        };
+
+        // Inject packets from gt_flow into synth_flow's bursts
+        const gt_bursts = flows.get(gt_flow.key) orelse @panic("can't find ground-truth flow key in original flow map!");
+        // gt_bursts: std.ArrayList(Burst); where Burst.packets: std.ArrayList(Packet) is what we want to copy
+        // remember to update Packet.time!!!
+        // just loop over packets in all bursts of gt_flow?
+        // TODO
+    }
+
+    // Push all bursts from synth_flows into burst queue
+    // TODO
 
     return BurstQueue.init(allocator, {});
 }
@@ -509,27 +569,31 @@ pub fn rank_choices(
     x: usize,
     in_count: usize,
     out_count: usize,
-) error{OutOfMemory}!std.ArrayList(struct { usize, f64 }) {
+) error{OutOfMemory}!struct { std.ArrayList(usize), std.ArrayList(f64) } {
     const x_f = @as(f64, @floatFromInt(x));
     const in_count_f = @as(f64, @floatFromInt(in_count));
     const out_count_f = @as(f64, @floatFromInt(out_count));
     var i = @floor(x_f * (out_count_f / in_count_f));
     var prev = x_f / in_count_f;
-    var res = std.ArrayList(struct { usize, f64 }).init(allocator);
+    var res_idxs = std.ArrayList(usize).init(allocator);
+    var res_probs = std.ArrayList(f64).init(allocator);
 
     while (i / out_count_f < (x_f + 1) / in_count_f) {
         i += 1.0;
 
         const next_end = if (i / out_count_f < (x_f + 1) / in_count_f) i / out_count_f else (x_f + 1) / in_count_f;
         const p = (next_end - prev) / (1.0 / in_count_f);
-        try res.append(.{ @as(usize, @intFromFloat(i - 1.0)), p });
+        try res_idxs.append(@as(usize, @intFromFloat(i - 1.0)));
+        try res_probs.append(p);
+
         prev = next_end;
     }
 
     const p = ((x_f + 1) / in_count_f - prev) / ((x_f + 1) / in_count_f - x_f / in_count_f);
     if (p > 0.0) {
-        try res.append(.{ @as(usize, @intFromFloat(i)), p });
+        try res_idxs.append(@as(usize, @intFromFloat(i)));
+        try res_probs.append(p);
     }
 
-    return res;
+    return .{ res_idxs, res_probs };
 }
