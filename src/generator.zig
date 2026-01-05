@@ -362,7 +362,10 @@ fn generate_bursts(
             flow_pkts += pkts;
         }
         const flow = Flow{
-            .key = time.FlowKey{ 0, 0 },
+            .key = time.FlowKey{
+                .saddr = 0,
+                .daddr = 0,
+            },
             .pkts = flow_pkts,
             .bursts = bursts,
         };
@@ -370,7 +373,7 @@ fn generate_bursts(
     }
 
     // Gather ground-truth flow sizes
-    const gt_flows = extract_flow_map(allocator, flows);
+    const gt_flows = try extract_flow_map(allocator, flows);
     defer gt_flows.deinit();
 
     // Sort both lists of flows
@@ -387,7 +390,7 @@ fn generate_bursts(
     const index_map = blk: {
         var gt_idxs = std.ArrayList(usize).init(allocator);
         for (0..synth_flows.items.len) |synth_idx| {
-            const target_idxs, const target_probs = rank_choices(allocator, synth_idx, synth_flows.items.len, gt_flows.items.len);
+            const target_idxs, const target_probs = try rank_choices(allocator, synth_idx, synth_flows.items.len, gt_flows.items.len);
             defer {
                 target_idxs.deinit();
                 target_probs.deinit();
@@ -400,28 +403,52 @@ fn generate_bursts(
     };
     defer index_map.deinit();
 
-    // Follow map to inject ground-truth flow keys and packets into synth_flows
-    for (synth_flows, index_map) |*synth_flow, gt_idx| {
+    // Set up BurstQueue
+    var bursts = BurstQueue.init(allocator, {});
+
+    // Follow map to match ground-truth flow keys and packets with synth_flows and push resulting bursts to the queue
+    for (synth_flows.items, index_map.items) |synth_flow, gt_idx| {
         const gt_flow = gt_flows.items[gt_idx];
 
-        // Map and inject flow key
-        synth_flow.*.key = time.FlowKey{
+        // Map flow key
+        const synth_key = time.FlowKey{
             .saddr = src_map.get(gt_flow.key.saddr) orelse @panic("source address not in AddrMap!"),
             .daddr = dst_map.get(gt_flow.key.daddr) orelse @panic("destination address not in AddrMap!"),
         };
 
         // Inject packets from gt_flow into synth_flow's bursts
         const gt_bursts = flows.get(gt_flow.key) orelse @panic("can't find ground-truth flow key in original flow map!");
-        // gt_bursts: std.ArrayList(Burst); where Burst.packets: std.ArrayList(Packet) is what we want to copy
-        // remember to update Packet.time!!!
-        // just loop over packets in all bursts of gt_flow?
-        // TODO
+
+        var gt_burst_idx: usize = 0;
+        var gt_pkt_idx: usize = 0;
+
+        // Add synth bursts to burst queue using packets from gt_bursts
+        for (synth_flow.bursts.?.items) |synth_burst| {
+            // synth_burst { start_time, end_time, pkts }
+            var packets = try std.ArrayList(time.Packet).initCapacity(allocator, synth_burst.pkts);
+            const n_f = @as(f64, @floatFromInt(synth_burst.pkts));
+            for (0..synth_burst.pkts) |i| {
+
+                // Update gt indices wrapping around if not enough bursts
+                if (gt_pkt_idx >= gt_bursts.items[gt_burst_idx].packets.items.len) {
+                    gt_pkt_idx = 0;
+                    gt_burst_idx += 1;
+                }
+                if (gt_burst_idx >= gt_bursts.items.len) {
+                    gt_burst_idx = 0;
+                }
+
+                var pkt = gt_bursts.items[gt_burst_idx].packets.items[gt_pkt_idx];
+                const i_f = @as(f64, @floatFromInt(i));
+                pkt.time = synth_burst.start_time + (i_f / n_f) * (synth_burst.end_time - synth_burst.start_time);
+                try packets.append(pkt);
+            }
+            const new_burst = Burst.init(synth_key, synth_burst.start_time, synth_burst.end_time, packets);
+            try bursts.add(new_burst);
+        }
     }
 
-    // Push all bursts from synth_flows into burst queue
-    // TODO
-
-    return BurstQueue.init(allocator, {});
+    return bursts;
 }
 
 fn generate_bursts_OLD(
