@@ -128,7 +128,14 @@ pub const TimeAnalyzer = struct {
     ///
     /// Returns the estimated shape parameter for on and off distributions respectively.
     ///
-    pub fn pareto_fit(self: TimeAnalyzer) error{OutOfMemory}!struct { struct { f64, f64 }, struct { f64, f64 }, struct { f64, f64 } } {
+    pub fn pareto_fit(
+        self: TimeAnalyzer,
+    ) error{OutOfMemory}!struct {
+        struct { f64, f64 },
+        struct { f64, f64 },
+        struct { f64, f64 },
+        struct { f64, f64 },
+    } {
         const a_on = a_on_blk: {
             const on_durs = try self.get_on_durations();
             defer on_durs.deinit();
@@ -150,7 +157,14 @@ pub const TimeAnalyzer = struct {
             break :blk try sols_fit_one(self.allocator, burst_sizes, 1.0);
         };
 
-        return .{ a_on, a_off, a_pkts };
+        const a_bursts = blk: {
+            const bursts = try self.get_flow_bursts();
+            defer bursts.deinit();
+
+            break :blk try sols_fit_one(self.allocator, bursts, 1.0);
+        };
+
+        return .{ a_on, a_off, a_pkts, a_bursts };
     }
 
     pub fn ols_fit_one(
@@ -348,6 +362,18 @@ pub const TimeAnalyzer = struct {
             for (bursts.items) |burst| {
                 try res.append(@as(f64, @floatFromInt(burst.packets.items.len)));
             }
+        }
+        return res;
+    }
+
+    ///
+    /// Returns an ArrayList of number of bursts in each flow
+    ///
+    pub fn get_flow_bursts(self: TimeAnalyzer) error{OutOfMemory}!std.ArrayList(f64) {
+        var res = std.ArrayList(f64).init(self.allocator);
+        var it = self.flows.valueIterator();
+        while (it.next()) |bursts| {
+            try res.append(@as(f64, @floatFromInt(bursts.items.len)));
         }
         return res;
     }
