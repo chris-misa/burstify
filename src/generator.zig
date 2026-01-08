@@ -341,10 +341,12 @@ fn generate_bursts(
         flow_start += rand.*.floatExp(f64) / time_params.flow_rate;
 
         // generate all bursts for this flow.
+        const num_bursts = @as(u32, @intFromFloat(pareto(time_params.a_bursts, time_params.m_bursts, rand)));
         var cur: f64 = flow_start;
-        var bursts = std.ArrayList(BurstTimes).init(allocator);
+        var bursts = try std.ArrayList(BurstTimes).initCapacity(allocator, num_bursts);
         var flow_pkts: u32 = 0;
-        while (cur < time_params.total_duration) {
+        var i: u32 = 0;
+        while (cur < time_params.total_duration and i < num_bursts) {
             const on_dur = pareto(time_params.a_on, time_params.m_on, rand);
             const off_dur = pareto(time_params.a_off, time_params.m_off, rand);
             const pkts = @as(u32, @intFromFloat(pareto(time_params.a_pkts, time_params.m_pkts, rand)));
@@ -360,6 +362,7 @@ fn generate_bursts(
             cur += on_dur;
             cur += off_dur;
             flow_pkts += pkts;
+            i += 1;
         }
         const flow = Flow{
             .key = time.FlowKey{

@@ -29,6 +29,8 @@ pub const TimeParameters = struct {
     m_off: f64, // position parameter of the off-period Pareto distribution
     a_pkts: f64, // shape parameter of the packets-per-burst distribution
     m_pkts: f64, // position parameter of the packets-per-burst distribution
+    a_bursts: f64, // shape parameter of the bursts-per-flow distribution
+    m_bursts: f64, // position parameter of the bursts-per-flow distribution
     flow_rate: f64, // mean flow-arrival rate
     total_duration: f64, // total duration of the output trace
 };
